@@ -317,6 +317,10 @@
                     <td class="whitespace-nowrap px-5 py-4 text-sm text-gray-700 dark:text-gray-300">
                       <div>{{ row.highest_category || '-' }}</div>
                       <div class="text-xs text-gray-400">{{ percent(row.highest_score) }}</div>
+                      <div class="text-xs text-gray-400">{{ auditEngineLabel(row.audit_engine) }}</div>
+                      <div v-if="row.audit_engine === 'chat_completions' && row.reason" class="mt-0.5 max-w-48 truncate text-xs text-gray-500 dark:text-gray-400" :title="row.reason">
+                        {{ row.reason }}
+                      </div>
                       <div v-if="row.matched_keyword" class="mt-0.5 text-xs font-medium text-red-600 dark:text-red-300" :title="t('admin.riskControl.matchedKeyword') + ': ' + row.matched_keyword">
                         {{ t('admin.riskControl.matchedKeyword') }}: {{ row.matched_keyword }}
                       </div>
@@ -402,6 +406,11 @@
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ modeDescription(configForm.mode) }}</p>
               </div>
               <div>
+                <label class="input-label">{{ t('admin.riskControl.auditEngine') }}</label>
+                <Select v-model="configForm.audit_engine" :options="auditEngineOptions" />
+                <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t(isChatModerationEngine ? 'admin.riskControl.auditEngineChatCompletionsHint' : 'admin.riskControl.auditEngineModerationHint') }}</p>
+              </div>
+              <div>
                 <label class="input-label">{{ t('admin.riskControl.baseUrl') }}</label>
                 <input v-model.trim="configForm.base_url" type="url" class="input" placeholder="https://api.openai.com" />
               </div>
@@ -424,6 +433,20 @@
                   <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">%</span>
                 </div>
               </div>
+            </div>
+
+            <div v-if="isChatModerationEngine" data-test="audit-prompt-editor" class="rounded-xl border border-sky-100 bg-sky-50/60 p-4 dark:border-sky-900/50 dark:bg-sky-950/20">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <label class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.auditPrompt') }}</label>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.auditPromptHint') }}</p>
+                </div>
+                <button type="button" class="btn btn-secondary inline-flex items-center gap-2 whitespace-nowrap" @click="restoreDefaultAuditPrompt">
+                  <Icon name="refresh" size="sm" />
+                  {{ t('admin.riskControl.restoreAuditPrompt') }}
+                </button>
+              </div>
+              <textarea v-model="configForm.audit_prompt" data-test="audit-prompt-input" class="input mt-3 min-h-64 resize-y font-mono text-xs leading-5" spellcheck="false"></textarea>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
@@ -661,8 +684,11 @@
                     <div class="flex items-start justify-between gap-3">
                       <div>
                         <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.auditTestResult') }}</p>
-                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <p v-if="moderationTestResult.audit_engine !== 'chat_completions'" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           {{ t('admin.riskControl.auditTestHighest', { category: moderationTestResult.highest_category || '-', score: percent(moderationTestResult.highest_score) }) }}
+                        </p>
+                        <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {{ t('admin.riskControl.auditTestConfidence', { score: percent(moderationTestResult.confidence) }) }}
                         </p>
                       </div>
                       <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium" :class="moderationTestResult.flagged ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'">
@@ -671,14 +697,17 @@
                     </div>
                     <div class="mt-3">
                       <div class="mb-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <span>{{ t('admin.riskControl.auditTestComposite') }}</span>
+                        <span>{{ moderationTestResult.audit_engine === 'chat_completions' ? t('admin.riskControl.auditTestConfidenceLabel') : t('admin.riskControl.auditTestComposite') }}</span>
                         <span class="font-semibold text-gray-900 dark:text-white">{{ percent(moderationTestResult.composite_score) }}</span>
                       </div>
                       <div class="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700">
                         <div class="h-full rounded-full" :class="moderationTestResult.flagged ? 'bg-red-500' : 'bg-emerald-500'" :style="{ width: percentWidth(moderationTestResult.composite_score) }"></div>
                       </div>
                     </div>
-                    <div class="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                    <p v-if="moderationTestResult.audit_engine === 'chat_completions' && moderationTestResult.reason" class="mt-3 rounded-md bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600 dark:bg-dark-700/60 dark:text-gray-300">
+                      {{ t('admin.riskControl.auditTestReason', { reason: moderationTestResult.reason }) }}
+                    </p>
+                    <div v-if="moderationTestResult.audit_engine !== 'chat_completions'" class="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                       <div v-for="score in moderationScoreRows" :key="score.category">
                         <div class="mb-1 flex items-center justify-between gap-3 text-xs">
                           <span class="truncate text-gray-600 dark:text-gray-300">{{ score.category }}</span>
@@ -1080,6 +1109,10 @@
               <p class="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
                 {{ inputDetailRow.highest_category || '-' }} / {{ percent(inputDetailRow.highest_score) }}
               </p>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ auditEngineLabel(inputDetailRow.audit_engine) }}</p>
+              <p v-if="inputDetailRow.audit_engine === 'chat_completions' && inputDetailRow.reason" class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                {{ inputDetailRow.reason }}
+              </p>
             </div>
             <div v-if="inputDetailRow.matched_keyword" class="rounded-lg border border-red-100 bg-red-50 p-4 dark:border-red-900/60 dark:bg-red-900/20">
               <p class="text-xs font-medium text-red-500 dark:text-red-300">{{ t('admin.riskControl.matchedKeyword') }}</p>
@@ -1127,6 +1160,7 @@ import { adminAPI } from '@/api/admin'
 import type {
   ContentModerationAPIKeyLoad,
   ContentModerationAPIKeyStatus,
+  ContentModerationAuditEngine,
   ContentModerationConfig,
   ContentModerationLog,
   ContentModerationModelFilter,
@@ -1137,6 +1171,7 @@ import type {
   ModerationMode,
   UpdateContentModerationConfig,
 } from '@/api/admin/riskControl'
+import { DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT } from '@/api/admin/riskControl'
 import type { AdminGroup, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -1219,6 +1254,8 @@ let statusTimer: number | null = null
 const configForm = reactive({
   enabled: false,
   mode: 'pre_block' as ModerationMode,
+  audit_engine: 'moderation' as ContentModerationAuditEngine,
+  audit_prompt: DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT,
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
   api_keys_text: '',
@@ -1285,6 +1322,13 @@ const modeOptions = computed<SelectOption[]>(() => [
   { value: 'observe', label: t('admin.riskControl.modeObserve') },
   { value: 'off', label: t('admin.riskControl.modeOff') },
 ])
+
+const auditEngineOptions = computed<SelectOption[]>(() => [
+  { value: 'moderation', label: t('admin.riskControl.auditEngineModeration') },
+  { value: 'chat_completions', label: t('admin.riskControl.auditEngineChatCompletions') },
+])
+
+const isChatModerationEngine = computed(() => configForm.audit_engine === 'chat_completions')
 
 const keywordBlockingModeOptions = computed<Array<{ value: KeywordBlockingMode; label: string; description: string }>>(() => [
   {
@@ -1693,6 +1737,8 @@ const runtimeBadgeClass = computed(() => {
 function applyConfig(config: ContentModerationConfig) {
   configForm.enabled = config.enabled
   configForm.mode = config.mode
+  configForm.audit_engine = config.audit_engine || 'moderation'
+  configForm.audit_prompt = config.audit_prompt || DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT
   configForm.base_url = config.base_url || 'https://api.openai.com'
   configForm.model = config.model || 'omni-moderation-latest'
   configForm.api_keys_text = ''
@@ -1784,6 +1830,8 @@ async function saveConfig() {
     const payload: UpdateContentModerationConfig = {
       enabled: configForm.enabled,
       mode: configForm.mode,
+      audit_engine: configForm.audit_engine,
+      audit_prompt: configForm.audit_prompt || DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT,
       base_url: configForm.base_url,
       model: configForm.model,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
@@ -1971,6 +2019,10 @@ function setModelFilterType(type: ContentModerationModelFilterType) {
   }
 }
 
+function restoreDefaultAuditPrompt() {
+  configForm.audit_prompt = DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT
+}
+
 async function testApiKeys(useInputKeys: boolean) {
   const keys = useInputKeys ? parseApiKeys(configForm.api_keys_text) : []
   if (useInputKeys && keys.length === 0) {
@@ -1984,6 +2036,8 @@ async function testApiKeys(useInputKeys: boolean) {
       base_url: configForm.base_url,
       model: configForm.model,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
+      audit_engine: configForm.audit_engine,
+      audit_prompt: configForm.audit_prompt || DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT,
       prompt: moderationTestPrompt.value,
       images: moderationTestImages.value,
     })
@@ -2112,6 +2166,12 @@ function modeDescription(mode: ModerationMode): string {
     off: t('admin.riskControl.modeOffDesc'),
   }
   return descriptions[mode] ?? ''
+}
+
+function auditEngineLabel(engine: string): string {
+  return engine === 'chat_completions'
+    ? t('admin.riskControl.auditEngineChatCompletions')
+    : t('admin.riskControl.auditEngineModeration')
 }
 
 function resultLabel(row: ContentModerationLog): string {

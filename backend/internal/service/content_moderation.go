@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -136,6 +135,8 @@ func ContentModerationCategories() []string {
 type ContentModerationConfig struct {
 	Enabled              bool                         `json:"enabled"`
 	Mode                 string                       `json:"mode"`
+	AuditEngine          string                       `json:"audit_engine"`
+	AuditPrompt          string                       `json:"audit_prompt"`
 	BaseURL              string                       `json:"base_url"`
 	Model                string                       `json:"model"`
 	APIKey               string                       `json:"api_key,omitempty"`
@@ -170,6 +171,8 @@ type ContentModerationConfig struct {
 type ContentModerationConfigView struct {
 	Enabled                        bool                            `json:"enabled"`
 	Mode                           string                          `json:"mode"`
+	AuditEngine                    string                          `json:"audit_engine"`
+	AuditPrompt                    string                          `json:"audit_prompt"`
 	BaseURL                        string                          `json:"base_url"`
 	Model                          string                          `json:"model"`
 	APIKeyConfigured               bool                            `json:"api_key_configured"`
@@ -232,12 +235,14 @@ type ContentModerationAPIKeyLoad struct {
 }
 
 type TestContentModerationAPIKeysInput struct {
-	APIKeys   []string `json:"api_keys"`
-	BaseURL   string   `json:"base_url"`
-	Model     string   `json:"model"`
-	TimeoutMS int      `json:"timeout_ms"`
-	Prompt    string   `json:"prompt"`
-	Images    []string `json:"images"`
+	APIKeys     []string `json:"api_keys"`
+	BaseURL     string   `json:"base_url"`
+	Model       string   `json:"model"`
+	TimeoutMS   int      `json:"timeout_ms"`
+	AuditEngine string   `json:"audit_engine"`
+	AuditPrompt string   `json:"audit_prompt"`
+	Prompt      string   `json:"prompt"`
+	Images      []string `json:"images"`
 }
 
 type TestContentModerationAPIKeysResult struct {
@@ -248,6 +253,9 @@ type TestContentModerationAPIKeysResult struct {
 
 type ContentModerationTestAuditResult struct {
 	Flagged         bool               `json:"flagged"`
+	AuditEngine     string             `json:"audit_engine"`
+	Confidence      float64            `json:"confidence"`
+	Reason          string             `json:"reason"`
 	HighestCategory string             `json:"highest_category"`
 	HighestScore    float64            `json:"highest_score"`
 	CompositeScore  float64            `json:"composite_score"`
@@ -258,6 +266,8 @@ type ContentModerationTestAuditResult struct {
 type UpdateContentModerationConfigInput struct {
 	Enabled                        *bool                         `json:"enabled"`
 	Mode                           *string                       `json:"mode"`
+	AuditEngine                    *string                       `json:"audit_engine"`
+	AuditPrompt                    *string                       `json:"audit_prompt"`
 	BaseURL                        *string                       `json:"base_url"`
 	Model                          *string                       `json:"model"`
 	APIKey                         *string                       `json:"api_key"`
@@ -364,6 +374,9 @@ type ContentModerationDecision struct {
 	Allowed         bool               `json:"allowed"`
 	Blocked         bool               `json:"blocked"`
 	Flagged         bool               `json:"flagged"`
+	AuditEngine     string             `json:"audit_engine"`
+	Confidence      float64            `json:"confidence"`
+	Reason          string             `json:"reason"`
 	Message         string             `json:"message"`
 	StatusCode      int                `json:"status_code"`
 	InputHash       string             `json:"input_hash,omitempty"`
@@ -386,10 +399,13 @@ type ContentModerationLog struct {
 	Provider          string             `json:"provider"`
 	Model             string             `json:"model"`
 	Mode              string             `json:"mode"`
+	AuditEngine       string             `json:"audit_engine"`
 	Action            string             `json:"action"`
 	Flagged           bool               `json:"flagged"`
 	HighestCategory   string             `json:"highest_category"`
 	HighestScore      float64            `json:"highest_score"`
+	Confidence        float64            `json:"confidence"`
+	Reason            string             `json:"reason"`
 	MatchedKeyword    string             `json:"matched_keyword"`
 	CategoryScores    map[string]float64 `json:"category_scores"`
 	ThresholdSnapshot map[string]float64 `json:"threshold_snapshot"`
@@ -594,6 +610,16 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.Mode != nil {
 		cfg.Mode = strings.TrimSpace(*input.Mode)
 	}
+	if input.AuditEngine != nil {
+		engine := strings.ToLower(strings.TrimSpace(*input.AuditEngine))
+		if !isValidContentModerationAuditEngine(engine) {
+			return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_AUDIT_ENGINE", "内容审计引擎无效")
+		}
+		cfg.AuditEngine = engine
+	}
+	if input.AuditPrompt != nil {
+		cfg.AuditPrompt = strings.TrimSpace(*input.AuditPrompt)
+	}
 	if input.BaseURL != nil {
 		cfg.BaseURL = strings.TrimSpace(*input.BaseURL)
 	}
@@ -719,10 +745,23 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 	if strings.TrimSpace(input.Model) != "" {
 		cfg.Model = input.Model
 	}
+	if strings.TrimSpace(input.AuditEngine) != "" {
+		engine := strings.ToLower(strings.TrimSpace(input.AuditEngine))
+		if !isValidContentModerationAuditEngine(engine) {
+			return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_AUDIT_ENGINE", "内容审计引擎无效")
+		}
+		cfg.AuditEngine = engine
+	}
+	if strings.TrimSpace(input.AuditPrompt) != "" {
+		cfg.AuditPrompt = input.AuditPrompt
+	}
 	if input.TimeoutMS > 0 {
 		cfg.TimeoutMS = input.TimeoutMS
 	}
 	cfg.normalize()
+	if err := validateContentModerationBaseURL(cfg.BaseURL); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_BASE_URL", "OpenAI Base URL 无效")
+	}
 	testInput, imageCount, err := buildModerationTestInput(input.Prompt, input.Images)
 	if err != nil {
 		return nil, err
@@ -754,7 +793,7 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 		} else {
 			s.markAPIKeySuccess(key, latency, httpStatus)
 			if auditResult == nil {
-				auditResult = buildContentModerationTestAuditResult(result, cfg.Thresholds)
+				auditResult = buildContentModerationTestAuditResultForEngine(result, cfg.Thresholds, cfg.AuditEngine)
 			}
 		}
 		status := s.apiKeyStatusForHash(idx, keyHash, maskSecretTail(key), configured)
@@ -1031,7 +1070,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		return allow
 	}
 
-	flagged, highestCategory, highestScore := evaluateModerationScores(result.CategoryScores, cfg.Thresholds)
+	flagged, highestCategory, highestScore, scores, confidence, reason := evaluateContentModerationResult(result, cfg)
 	action := ContentModerationActionAllow
 	blocked := false
 	if allowBlock && flagged && cfg.Mode == ContentModerationModePreBlock {
@@ -1058,7 +1097,9 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		"latency_ms", latency,
 		"queue_delay_ms", queueDelay)
 	if flagged || cfg.RecordNonHits {
-		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), &latency, queueDelay, "")
+		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, scores, content.ExcerptText(), &latency, queueDelay, "")
+		log.Confidence = confidence
+		log.Reason = reason
 		if queueDelay == nil && cfg.Mode == ContentModerationModePreBlock {
 			s.enqueueRecord(input, cfg, log, hashText, flagged, flagged)
 		} else {
@@ -1070,21 +1111,27 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 			Allowed:         false,
 			Blocked:         true,
 			Flagged:         true,
+			AuditEngine:     normalizeContentModerationAuditEngine(cfg.AuditEngine),
+			Confidence:      confidence,
+			Reason:          reason,
 			Message:         cfg.BlockMessage,
 			StatusCode:      cfg.BlockStatus,
 			HighestCategory: highestCategory,
 			HighestScore:    highestScore,
-			CategoryScores:  result.CategoryScores,
+			CategoryScores:  scores,
 			Action:          action,
 		}
 	}
 	return &ContentModerationDecision{
 		Allowed:         true,
 		Flagged:         flagged,
+		AuditEngine:     normalizeContentModerationAuditEngine(cfg.AuditEngine),
+		Confidence:      confidence,
+		Reason:          reason,
 		Message:         "",
 		HighestCategory: highestCategory,
 		HighestScore:    highestScore,
-		CategoryScores:  result.CategoryScores,
+		CategoryScores:  scores,
 		Action:          action,
 	}
 }
@@ -1475,7 +1522,7 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	default:
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODE", "内容审计模式无效")
 	}
-	if _, err := url.ParseRequestURI(cfg.BaseURL); err != nil {
+	if err := validateContentModerationBaseURL(cfg.BaseURL); err != nil {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_BASE_URL", "OpenAI Base URL 无效")
 	}
 	if cfg.BlockStatus < 400 || cfg.BlockStatus > 599 {
@@ -1546,16 +1593,20 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 }
 
 func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Context, cfg *ContentModerationConfig, apiKey string, input any, httpStatus *int) (*moderationAPIResult, error) {
-	base := strings.TrimRight(cfg.BaseURL, "/")
-	endpoint, err := url.JoinPath(base, "/v1/moderations")
+	engine := normalizeContentModerationAuditEngine(cfg.AuditEngine)
+	endpoint, err := contentModerationEndpoint(cfg.BaseURL, engine)
 	if err != nil {
 		return nil, err
 	}
-	payload := moderationAPIRequest{
-		Model: cfg.Model,
-		Input: input,
+	var raw []byte
+	if engine == ContentModerationAuditEngineChatCompletions {
+		raw, err = json.Marshal(buildChatModerationRequest(cfg.Model, cfg.AuditPrompt, input))
+	} else {
+		raw, err = json.Marshal(moderationAPIRequest{
+			Model: cfg.Model,
+			Input: input,
+		})
 	}
-	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -1587,8 +1638,15 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("moderation api status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+	body, err := readContentModerationResponseBody(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if engine == ContentModerationAuditEngineChatCompletions {
+		return parseChatModerationResponse(body)
+	}
 	var out moderationAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, err
 	}
 	if len(out.Results) == 0 {
@@ -1618,6 +1676,7 @@ func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, c
 		Provider:          input.Provider,
 		Model:             input.Model,
 		Mode:              cfg.Mode,
+		AuditEngine:       normalizeContentModerationAuditEngine(cfg.AuditEngine),
 		Action:            action,
 		Flagged:           flagged,
 		HighestCategory:   highestCategory,
@@ -1825,6 +1884,8 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 	return &ContentModerationConfig{
 		Enabled:              false,
 		Mode:                 ContentModerationModePreBlock,
+		AuditEngine:          ContentModerationAuditEngineModeration,
+		AuditPrompt:          defaultContentModerationAuditPrompt,
 		BaseURL:              defaultContentModerationBaseURL,
 		Model:                defaultContentModerationModel,
 		TimeoutMS:            defaultContentModerationTimeoutMS,
@@ -1880,6 +1941,10 @@ func (cfg *ContentModerationConfig) normalize() {
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = ContentModerationModePreBlock
+	}
+	cfg.AuditEngine = normalizeContentModerationAuditEngine(cfg.AuditEngine)
+	if strings.TrimSpace(cfg.AuditPrompt) == "" {
+		cfg.AuditPrompt = defaultContentModerationAuditPrompt
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultContentModerationBaseURL
@@ -2150,6 +2215,8 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 	return &ContentModerationConfigView{
 		Enabled:                        cfg.Enabled,
 		Mode:                           cfg.Mode,
+		AuditEngine:                    normalizeContentModerationAuditEngine(cfg.AuditEngine),
+		AuditPrompt:                    cfg.AuditPrompt,
 		BaseURL:                        cfg.BaseURL,
 		Model:                          cfg.Model,
 		APIKeyConfigured:               len(keys) > 0,
@@ -2377,18 +2444,25 @@ func validateModerationTestImageDataURL(value string) error {
 }
 
 func buildContentModerationTestAuditResult(result *moderationAPIResult, thresholds map[string]float64) *ContentModerationTestAuditResult {
+	return buildContentModerationTestAuditResultForEngine(result, thresholds, ContentModerationAuditEngineModeration)
+}
+
+func buildContentModerationTestAuditResultForEngine(result *moderationAPIResult, thresholds map[string]float64, engine string) *ContentModerationTestAuditResult {
 	if result == nil {
 		return nil
 	}
-	scores := make(map[string]float64, len(result.CategoryScores))
-	for category, score := range result.CategoryScores {
-		scores[category] = score
-	}
 	thresholdSnapshot := mergeContentModerationThresholds(ContentModerationDefaultThresholds(), thresholds)
-	flagged, highestCategory, highestScore := evaluateModerationScores(scores, thresholdSnapshot)
+	cfg := &ContentModerationConfig{AuditEngine: engine, Thresholds: thresholdSnapshot}
+	flagged, highestCategory, highestScore, scores, confidence, reason := evaluateContentModerationResult(result, cfg)
+	if normalizeContentModerationAuditEngine(engine) == ContentModerationAuditEngineChatCompletions {
+		thresholdSnapshot = map[string]float64{}
+	}
 	compositeScore := highestScore
 	return &ContentModerationTestAuditResult{
 		Flagged:         flagged,
+		AuditEngine:     normalizeContentModerationAuditEngine(engine),
+		Confidence:      confidence,
+		Reason:          reason,
 		HighestCategory: highestCategory,
 		HighestScore:    highestScore,
 		CompositeScore:  compositeScore,
@@ -2418,6 +2492,8 @@ type moderationAPIResponse struct {
 
 type moderationAPIResult struct {
 	Flagged        bool               `json:"flagged"`
+	Confidence     float64            `json:"confidence,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
 	CategoryScores map[string]float64 `json:"category_scores"`
 }
 

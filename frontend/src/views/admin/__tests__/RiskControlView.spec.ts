@@ -5,12 +5,14 @@ import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 
 import RiskControlView from '../RiskControlView.vue'
 import type { ContentModerationConfig, UpdateContentModerationConfig } from '@/api/admin/riskControl'
+import { DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT } from '@/api/admin/riskControl'
 
 const {
   getConfig,
   updateConfig,
   getStatus,
   listLogs,
+  testAPIKeys,
   getGroups,
   showError,
   showSuccess,
@@ -19,6 +21,7 @@ const {
   updateConfig: vi.fn(),
   getStatus: vi.fn(),
   listLogs: vi.fn(),
+  testAPIKeys: vi.fn(),
   getGroups: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -31,7 +34,7 @@ vi.mock('@/api/admin', () => ({
       updateConfig,
       getStatus,
       listLogs,
-      testAPIKeys: vi.fn(),
+      testAPIKeys,
       deleteFlaggedHash: vi.fn(),
       clearFlaggedHashes: vi.fn(),
       unbanUser: vi.fn(),
@@ -71,6 +74,8 @@ vi.mock('vue-i18n', async () => {
 const baseConfig = (): ContentModerationConfig => ({
   enabled: true,
   mode: 'pre_block',
+  audit_engine: 'moderation',
+  audit_prompt: 'default audit prompt',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
   api_key_configured: false,
@@ -89,6 +94,7 @@ const baseConfig = (): ContentModerationConfig => ({
   block_message: '内容审计命中风险规则，请调整输入后重试',
   email_on_hit: true,
   auto_ban_enabled: true,
+  cyber_policy_exclude_from_ban_count: false,
   ban_threshold: 10,
   violation_window_hours: 720,
   retry_count: 2,
@@ -190,6 +196,7 @@ describe('admin RiskControlView', () => {
     updateConfig.mockReset()
     getStatus.mockReset()
     listLogs.mockReset()
+    testAPIKeys.mockReset()
     getGroups.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
@@ -197,6 +204,7 @@ describe('admin RiskControlView', () => {
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
+    testAPIKeys.mockResolvedValue({ items: [], image_count: 0 })
     getGroups.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
@@ -274,6 +282,97 @@ describe('admin RiskControlView', () => {
       }),
     }))
     expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('saves the custom audit engine and editable system prompt', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    const vm = wrapper.vm as any
+    vm.configForm.audit_engine = 'chat_completions'
+    await flushPromises()
+    await wrapper.get('[data-test="audit-prompt-input"]').setValue('custom audit prompt')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      audit_engine: 'chat_completions',
+      audit_prompt: 'custom audit prompt',
+    }))
+  })
+
+  it('restores the default prompt before saving', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    const vm = wrapper.vm as any
+    vm.configForm.audit_engine = 'chat_completions'
+    await flushPromises()
+    const prompt = wrapper.get('[data-test="audit-prompt-input"]')
+    await prompt.setValue('temporary prompt')
+    await findButtonByText(wrapper, 'admin.riskControl.restoreAuditPrompt').trigger('click')
+
+    expect((prompt.element as HTMLTextAreaElement).value).toBe(DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT)
+  })
+
+  it('passes the selected audit engine and system prompt to the key test request', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    const vm = wrapper.vm as any
+    vm.configForm.audit_engine = 'chat_completions'
+    vm.configForm.audit_prompt = 'test system prompt'
+    vm.configForm.api_keys_text = 'sk-test'
+    vm.moderationTestPrompt = 'test user input'
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.testInputApiKeys').trigger('click')
+    await flushPromises()
+
+    expect(testAPIKeys).toHaveBeenCalledWith(expect.objectContaining({
+      audit_engine: 'chat_completions',
+      audit_prompt: 'test system prompt',
+      prompt: 'test user input',
+      api_keys: ['sk-test'],
+    }))
   })
 
   it('describes worker runtime as async audit and pre-block record processing', async () => {

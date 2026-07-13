@@ -51,18 +51,18 @@ func (r *contentModerationRepository) CreateLog(ctx context.Context, log *servic
 	err = r.db.QueryRowContext(ctx, `
 INSERT INTO content_moderation_logs (
     request_id, user_id, user_email, api_key_id, api_key_name, group_id, group_name,
-    endpoint, provider, model, mode, action, flagged, highest_category, highest_score,
-    category_scores, threshold_snapshot, input_excerpt, upstream_latency_ms, error,
+    endpoint, provider, model, mode, audit_engine, action, flagged, highest_category, highest_score,
+    confidence, reason, category_scores, threshold_snapshot, input_excerpt, upstream_latency_ms, error,
     violation_count, auto_banned, email_sent, queue_delay_ms, matched_keyword
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11, $12, $13, $14, $15,
-    $16::jsonb, $17::jsonb, $18, $19, $20,
-    $21, $22, $23, $24, $25
+    $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19::jsonb, $20::jsonb, $21, $22, $23,
+    $24, $25, $26, $27, $28
 ) RETURNING id, created_at`,
 		log.RequestID, userID, log.UserEmail, apiKeyID, log.APIKeyName, groupID, log.GroupName,
-		log.Endpoint, log.Provider, log.Model, log.Mode, log.Action, log.Flagged, log.HighestCategory, log.HighestScore,
-		string(categoryScores), string(thresholdSnapshot), log.InputExcerpt, latency, log.Error,
+		log.Endpoint, log.Provider, log.Model, log.Mode, log.AuditEngine, log.Action, log.Flagged, log.HighestCategory, log.HighestScore,
+		log.Confidence, log.Reason, string(categoryScores), string(thresholdSnapshot), log.InputExcerpt, latency, log.Error,
 		log.ViolationCount, log.AutoBanned, log.EmailSent, nullableIntPtr(log.QueueDelayMS), log.MatchedKeyword,
 	).Scan(&log.ID, &log.CreatedAt)
 	if err != nil {
@@ -95,8 +95,8 @@ func (r *contentModerationRepository) ListLogs(ctx context.Context, filter servi
 	rows, err := r.db.QueryContext(ctx, `
 SELECT
     l.id, l.request_id, l.user_id, l.user_email, l.api_key_id, l.api_key_name, l.group_id, l.group_name,
-    l.endpoint, l.provider, l.model, l.mode, l.action, l.flagged, l.highest_category, l.highest_score,
-    l.category_scores, l.threshold_snapshot, l.input_excerpt, l.upstream_latency_ms, l.error,
+    l.endpoint, l.provider, l.model, l.mode, l.audit_engine, l.action, l.flagged, l.highest_category, l.highest_score,
+    l.confidence, l.reason, l.category_scores, l.threshold_snapshot, l.input_excerpt, l.upstream_latency_ms, l.error,
     l.violation_count, l.auto_banned, l.email_sent, COALESCE(u.status, ''), l.queue_delay_ms, l.matched_keyword, l.created_at
 FROM content_moderation_logs l
 LEFT JOIN users u ON u.id = l.user_id `+whereSQL+`
@@ -127,10 +127,13 @@ LIMIT $`+fmt.Sprint(len(queryArgs)-1)+` OFFSET $`+fmt.Sprint(len(queryArgs)),
 			&item.Provider,
 			&item.Model,
 			&item.Mode,
+			&item.AuditEngine,
 			&item.Action,
 			&item.Flagged,
 			&item.HighestCategory,
 			&item.HighestScore,
+			&item.Confidence,
+			&item.Reason,
 			&scoresRaw,
 			&thresholdsRaw,
 			&item.InputExcerpt,

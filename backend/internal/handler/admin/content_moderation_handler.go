@@ -22,6 +22,8 @@ func NewContentModerationHandler(svc *service.ContentModerationService) *Content
 type contentModerationConfigRequest struct {
 	Enabled              *bool               `json:"enabled"`
 	Mode                 *string             `json:"mode"`
+	AuditEngine          *string             `json:"audit_engine"`
+	AuditPrompt          *string             `json:"audit_prompt"`
 	BaseURL              *string             `json:"base_url"`
 	Model                *string             `json:"model"`
 	APIKey               *string             `json:"api_key"`
@@ -56,12 +58,14 @@ type contentModerationConfigRequest struct {
 }
 
 type contentModerationAPIKeyTestRequest struct {
-	APIKeys   []string `json:"api_keys"`
-	BaseURL   string   `json:"base_url"`
-	Model     string   `json:"model"`
-	TimeoutMS int      `json:"timeout_ms"`
-	Prompt    string   `json:"prompt"`
-	Images    []string `json:"images"`
+	APIKeys     []string `json:"api_keys"`
+	BaseURL     string   `json:"base_url"`
+	Model       string   `json:"model"`
+	TimeoutMS   int      `json:"timeout_ms"`
+	AuditEngine string   `json:"audit_engine"`
+	AuditPrompt string   `json:"audit_prompt"`
+	Prompt      string   `json:"prompt"`
+	Images      []string `json:"images"`
 }
 
 type contentModerationHashRequest struct {
@@ -86,6 +90,8 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
+		AuditEngine:                    req.AuditEngine,
+		AuditPrompt:                    req.AuditPrompt,
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
 		APIKey:                         req.APIKey,
@@ -130,12 +136,14 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		return
 	}
 	result, err := h.service.TestAPIKeys(c.Request.Context(), service.TestContentModerationAPIKeysInput{
-		APIKeys:   req.APIKeys,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		TimeoutMS: req.TimeoutMS,
-		Prompt:    req.Prompt,
-		Images:    req.Images,
+		APIKeys:     req.APIKeys,
+		BaseURL:     req.BaseURL,
+		Model:       req.Model,
+		TimeoutMS:   req.TimeoutMS,
+		AuditEngine: req.AuditEngine,
+		AuditPrompt: req.AuditPrompt,
+		Prompt:      req.Prompt,
+		Images:      req.Images,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

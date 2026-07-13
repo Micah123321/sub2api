@@ -56,3 +56,35 @@ func TestContentModerationRepositoryCountFlaggedByUserSince_ExcludesCyberPolicyW
 	require.Equal(t, 3, count)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestContentModerationRepositoryCreateLogPersistsCustomAuditFields(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := NewContentModerationRepository(db)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO content_moderation_logs")).
+		WithArgs(
+			"req-custom", nil, "", nil, "", nil, "",
+			"", "", "", "", "chat_completions", "block", true, "custom", 0.88,
+			0.88, "针对他人系统攻击", `{"custom":0.88}`, `{}`, "", nil, "", 0, false, false, nil, "",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(7, time.Now()))
+
+	log := &service.ContentModerationLog{
+		RequestID:         "req-custom",
+		AuditEngine:       service.ContentModerationAuditEngineChatCompletions,
+		Action:            service.ContentModerationActionBlock,
+		Flagged:           true,
+		HighestCategory:   "custom",
+		HighestScore:      0.88,
+		Confidence:        0.88,
+		Reason:            "针对他人系统攻击",
+		CategoryScores:    map[string]float64{"custom": 0.88},
+		ThresholdSnapshot: map[string]float64{},
+	}
+
+	require.NoError(t, repo.CreateLog(context.Background(), log))
+	require.Equal(t, int64(7), log.ID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
