@@ -137,9 +137,11 @@ func (c *GHCRClient) listViaPackagesAPI(ctx context.Context, owner, packageName 
 		out := make([]service.GHCRImageTag, 0, len(versions)*2)
 		seen := make(map[string]struct{})
 		for _, v := range versions {
-			updatedAt := v.UpdatedAt
-			if updatedAt == "" {
-				updatedAt = v.CreatedAt
+			// Prefer created_at so custom channel versions order by package creation time.
+			// Fall back to updated_at when create time is missing.
+			createdAt := strings.TrimSpace(v.CreatedAt)
+			if createdAt == "" {
+				createdAt = strings.TrimSpace(v.UpdatedAt)
 			}
 			digest := strings.TrimSpace(v.Name)
 			for _, tag := range v.Metadata.Container.Tags {
@@ -148,13 +150,14 @@ func (c *GHCRClient) listViaPackagesAPI(ctx context.Context, owner, packageName 
 					continue
 				}
 				if _, ok := seen[tag]; ok {
+					// Keep first-seen (Packages API returns newest versions first).
 					continue
 				}
 				seen[tag] = struct{}{}
 				out = append(out, service.GHCRImageTag{
 					Tag:       tag,
 					Digest:    digest,
-					UpdatedAt: updatedAt,
+					UpdatedAt: createdAt,
 					HTMLURL:   v.HTMLURL,
 				})
 			}

@@ -704,7 +704,7 @@ func (s *UpdateService) fetchLatestCustom(ctx context.Context) (*UpdateInfo, err
 		return nil, fmt.Errorf("no custom tags found for image %s", s.customImage)
 	}
 
-	// Prefer floating "custom" tag as latest, else newest custom-<sha>
+	// Latest immutable custom-<sha> by package create/update time (not floating retag).
 	latest := pickLatestCustomTag(filtered)
 	method := s.detectUpdateMethod(UpdateChannelCustom)
 	manualCmd := ""
@@ -781,19 +781,22 @@ func (s *UpdateService) customHasUpdate(latest GHCRImageTag) bool {
 	if latest.Tag == "" {
 		return false
 	}
-	// Floating tag: only claim update when we cannot prove current is already a custom build.
+	// Floating tag alone cannot express a newer build; treat as "unknown newer"
+	// only when the running binary is not already a custom image build.
 	if latest.Tag == "custom" {
-		if s.currentCommit != "" {
-			if strings.Contains(s.currentVersion, shortCommit(s.currentCommit)) {
-				return false
-			}
+		if s.isCurrentCustomTag(latest) {
+			return false
+		}
+		if s.currentCommit != "" && strings.Contains(s.currentVersion, shortCommit(s.currentCommit)) {
+			return false
 		}
 		if strings.Contains(s.currentVersion, "-custom.") || strings.Contains(s.currentVersion, "custom-") {
+			// Already on some custom build; without a newer immutable tag do not force update.
 			return false
 		}
 		return true
 	}
-	// Immutable custom-<sha>
+	// Immutable custom-<sha>: update when the running image/commit is not that sha.
 	if strings.HasPrefix(latest.Tag, "custom-") {
 		sha := strings.TrimPrefix(latest.Tag, "custom-")
 		if sha == "" {
@@ -1215,30 +1218,89 @@ func filterCustomTags(tags []GHCRImageTag) []GHCRImageTag {
 	return out
 }
 
+// pickLatestCustomTag selects the newest custom-channel tag by creation/update time.
+// Immutable tags (custom-<sha>) are preferred over the floating "custom" retag so that
+// update detection and version display track real builds chronologically.
 func pickLatestCustomTag(tags []GHCRImageTag) GHCRImageTag {
-	// Prefer floating "custom" if present
-	for _, t := range tags {
-		if t.Tag == "custom" {
-			return t
-		}
-	}
-	sortCustomTagsNewestFirst(tags)
 	if len(tags) == 0 {
 		return GHCRImageTag{}
 	}
+	immutable := make([]GHCRImageTag, 0, len(tags))
+	var floating GHCRImageTag
+	for _, t := range tags {
+		if t.Tag == "custom" {
+			if floating.Tag == "" || compareGHCRTagTime(t, floating) > 0 {
+				floating = t
+			}
+			continue
+		}
+		if strings.HasPrefix(t.Tag, "custom-") {
+			immutable = append(immutable, t)
+		}
+	}
+	if len(immutable) > 0 {
+		sortCustomTagsNewestFirst(immutable)
+		return immutable[0]
+	}
+	if floating.Tag != "" {
+		return floating
+	}
+	sortCustomTagsNewestFirst(tags)
 	return tags[0]
 }
 
+// sortCustomTagsNewestFirst orders tags by UpdatedAt/CreatedAt descending.
+// Timestamps are parsed as RFC3339 when possible; missing times rank older.
 func sortCustomTagsNewestFirst(tags []GHCRImageTag) {
 	sort.SliceStable(tags, func(i, j int) bool {
-		ti, tj := tags[i].UpdatedAt, tags[j].UpdatedAt
-		if ti != "" && tj != "" && ti != tj {
-			// RFC3339 lexical order works for ISO timestamps
-			return ti > tj
+		cmp := compareGHCRTagTime(tags[i], tags[j])
+		if cmp != 0 {
+			return cmp > 0
 		}
-		// fallback: custom-<sha> lexicographic by tag (newest unknown)
+		// Same/unknown time: keep deterministic order by tag name (not used as version order).
 		return tags[i].Tag > tags[j].Tag
 	})
+}
+
+// compareGHCRTagTime returns 1 if a is newer than b, -1 if older, 0 if equal/unknown.
+func compareGHCRTagTime(a, b GHCRImageTag) int {
+	ta, oka := parseGHCRTime(a.UpdatedAt)
+	tb, okb := parseGHCRTime(b.UpdatedAt)
+	switch {
+	case oka && okb:
+		if ta.After(tb) {
+			return 1
+		}
+		if ta.Before(tb) {
+			return -1
+		}
+		return 0
+	case oka && !okb:
+		return 1
+	case !oka && okb:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func parseGHCRTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	// Packages API uses RFC3339 / RFC3339Nano
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, true
+	}
+	// Fallback: raw ISO without timezone
+	if t, err := time.Parse("2006-01-02T15:04:05", value); err == nil {
+		return t.UTC(), true
+	}
+	return time.Time{}, false
 }
 
 func shortCommit(commit string) string {

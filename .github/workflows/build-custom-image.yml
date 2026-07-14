@@ -1,6 +1,10 @@
 name: Build custom image
 
 on:
+  # 任何推送到 custom 的提交都自动构建并推送 GHCR（人工 commit / PAT 推送）
+  push:
+    branches:
+      - custom
   workflow_dispatch:
     inputs:
       ref:
@@ -8,6 +12,7 @@ on:
         required: false
         type: string
         default: custom
+  # GITHUB_TOKEN 推送不会触发 push 工作流；Sync upstream 合并后通过 workflow_call 构建
   workflow_call:
     inputs:
       ref:
@@ -21,6 +26,7 @@ permissions:
   packages: write
 
 concurrency:
+  # 同一时刻只保留最新一次 custom 构建，避免连续推送排队堆积
   group: build-custom-image
   cancel-in-progress: true
 
@@ -30,10 +36,25 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Resolve build ref
+        id: ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          # push 事件：始终构建触发该 push 的 custom 分支 tip
+          # workflow_dispatch / workflow_call：使用 inputs.ref（默认 custom）
+          if [ "${{ github.event_name }}" = "push" ]; then
+            REF="${{ github.ref_name }}"
+          else
+            REF="${{ inputs.ref || 'custom' }}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Building ref: ${REF}"
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref || 'custom' }}
+          ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -106,9 +127,11 @@ jobs:
             echo "- Image: \`${{ steps.meta.outputs.image }}\`"
             echo "- Tags: \`custom\`, \`custom-${{ steps.meta.outputs.short_sha }}\`"
             echo "- Version: \`${{ steps.meta.outputs.version }}\`"
-            echo "- Ref: \`${{ inputs.ref || 'custom' }}\`"
+            echo "- Ref: \`${{ steps.ref.outputs.ref }}\`"
+            echo "- Event: \`${{ github.event_name }}\`"
             echo ""
             echo "\`\`\`bash"
             echo "docker pull ${{ steps.meta.outputs.image }}:custom"
+            echo "docker pull ${{ steps.meta.outputs.image }}:custom-${{ steps.meta.outputs.short_sha }}"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
