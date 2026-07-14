@@ -109,13 +109,13 @@ type UpdateService struct {
 
 // UpdateServiceOptions carries optional dependencies for UpdateService construction.
 type UpdateServiceOptions struct {
-	SettingRepo  SettingRepository
-	GHCRClient   GHCRClient
-	OfficialRepo string
-	CustomImage  string
+	SettingRepo   SettingRepository
+	GHCRClient    GHCRClient
+	OfficialRepo  string
+	CustomImage   string
 	CurrentCommit string
-	DataDir      string
-	Config       *config.Config
+	DataDir       string
+	Config        *config.Config
 }
 
 // NewUpdateService creates a new UpdateService
