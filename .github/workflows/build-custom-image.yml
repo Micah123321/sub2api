@@ -1,0 +1,114 @@
+name: Build custom image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (branch, tag, or SHA)'
+        required: false
+        type: string
+        default: custom
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to build (branch, tag, or SHA)'
+        required: false
+        type: string
+        default: custom
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-custom-image
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || 'custom' }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OWNER_LOWER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          REPO_NAME="$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          FULL_SHA="$(git rev-parse HEAD)"
+          IMAGE="ghcr.io/${OWNER_LOWER}/${REPO_NAME}"
+
+          VERSION_FILE="backend/cmd/server/VERSION"
+          if [ -f "$VERSION_FILE" ]; then
+            BASE_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+          else
+            BASE_VERSION="0.0.0"
+          fi
+          VERSION="${BASE_VERSION}-custom.${SHORT_SHA}"
+
+          {
+            echo "owner_lower=${OWNER_LOWER}"
+            echo "image=${IMAGE}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "full_sha=${FULL_SHA}"
+            echo "version=${VERSION}"
+            echo "tags=${IMAGE}:custom,${IMAGE}:custom-${SHORT_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Image: ${IMAGE}"
+          echo "Tags: custom, custom-${SHORT_SHA}"
+          echo "Version: ${VERSION}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ steps.meta.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.full_sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## Custom image pushed"
+            echo ""
+            echo "- Image: \`${{ steps.meta.outputs.image }}\`"
+            echo "- Tags: \`custom\`, \`custom-${{ steps.meta.outputs.short_sha }}\`"
+            echo "- Version: \`${{ steps.meta.outputs.version }}\`"
+            echo "- Ref: \`${{ inputs.ref || 'custom' }}\`"
+            echo ""
+            echo "\`\`\`bash"
+            echo "docker pull ${{ steps.meta.outputs.image }}:custom"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -2,13 +2,14 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
 
-const updateCacheKey = "update:latest"
+const defaultUpdateCacheKey = "update:latest"
 
 type updateCache struct {
 	rdb *redis.Client
@@ -18,10 +19,17 @@ func NewUpdateCache(rdb *redis.Client) service.UpdateCache {
 	return &updateCache{rdb: rdb}
 }
 
-func (c *updateCache) GetUpdateInfo(ctx context.Context) (string, error) {
-	return c.rdb.Get(ctx, updateCacheKey).Result()
+func (c *updateCache) GetUpdateInfo(ctx context.Context, key string) (string, error) {
+	return c.rdb.Get(ctx, resolveUpdateCacheKey(key)).Result()
 }
 
-func (c *updateCache) SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error {
-	return c.rdb.Set(ctx, updateCacheKey, data, ttl).Err()
+func (c *updateCache) SetUpdateInfo(ctx context.Context, key, data string, ttl time.Duration) error {
+	return c.rdb.Set(ctx, resolveUpdateCacheKey(key), data, ttl).Err()
+}
+
+func resolveUpdateCacheKey(key string) string {
+	if strings.TrimSpace(key) == "" {
+		return defaultUpdateCacheKey
+	}
+	return key
 }

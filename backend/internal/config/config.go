@@ -155,6 +155,14 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+	// OfficialRepo 官方 GitHub Release 仓库（owner/name）
+	OfficialRepo string `mapstructure:"official_repo"`
+	// CustomImage custom 通道 GHCR 镜像（如 ghcr.io/micah123321/sub2api）
+	// 也可通过环境变量 SUB2API_CUSTOM_IMAGE 覆盖
+	CustomImage string `mapstructure:"custom_image"`
+	// GHCRToken 可选，用于访问私有 GHCR / GitHub Packages 的 token
+	// 也可通过环境变量 SUB2API_GHCR_TOKEN 或 GITHUB_TOKEN 提供
+	GHCRToken string `mapstructure:"ghcr_token"`
 }
 
 type IdempotencyConfig struct {
@@ -1940,6 +1948,12 @@ func setDefaults() {
 	viper.SetDefault("idempotency.max_stored_response_len", 64*1024)
 	viper.SetDefault("idempotency.cleanup_interval_seconds", 60)
 	viper.SetDefault("idempotency.cleanup_batch_size", 500)
+
+	// Update channels
+	viper.SetDefault("update.proxy_url", "")
+	viper.SetDefault("update.official_repo", "Wei-Shaw/sub2api")
+	viper.SetDefault("update.custom_image", "ghcr.io/micah123321/sub2api")
+	viper.SetDefault("update.ghcr_token", "")
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久

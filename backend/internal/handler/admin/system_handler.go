@@ -28,6 +28,8 @@ type systemUpdateService interface {
 	Rollback() error
 	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
 	RollbackToVersion(ctx context.Context, version string) error
+	GetChannel(ctx context.Context) (string, error)
+	SetChannel(ctx context.Context, channel string) error
 }
 
 // NewSystemHandler creates a new SystemHandler
@@ -42,8 +44,12 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 // GET /api/v1/admin/system/version
 func (h *SystemHandler) GetVersion(c *gin.Context) {
 	info, _ := h.updateSvc.CheckUpdate(c.Request.Context(), false)
+	version := ""
+	if info != nil {
+		version = info.CurrentVersion
+	}
 	response.Success(c, gin.H{
-		"version": info.CurrentVersion,
+		"version": version,
 	})
 }
 
@@ -57,6 +63,43 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 		return
 	}
 	response.Success(c, info)
+}
+
+// GetUpdateChannel returns the active update channel
+// GET /api/v1/admin/system/update-channel
+func (h *SystemHandler) GetUpdateChannel(c *gin.Context) {
+	channel, err := h.updateSvc.GetChannel(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"channel": channel,
+	})
+}
+
+// SetUpdateChannel updates the active update channel
+// PUT /api/v1/admin/system/update-channel
+func (h *SystemHandler) SetUpdateChannel(c *gin.Context) {
+	var req struct {
+		Channel string `json:"channel"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.updateSvc.SetChannel(c.Request.Context(), req.Channel); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	channel, err := h.updateSvc.GetChannel(c.Request.Context())
+	if err != nil {
+		// Set succeeded; fall back to normalized request channel rather than empty.
+		channel = strings.ToLower(strings.TrimSpace(req.Channel))
+	}
+	response.Success(c, gin.H{
+		"channel": channel,
+	})
 }
 
 // PerformUpdate downloads and applies the update
@@ -88,6 +131,8 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 					"already_up_to_date": true,
 					"current_version":    info.CurrentVersion,
 					"latest_version":     info.LatestVersion,
+					"channel":            info.Channel,
+					"update_method":      info.UpdateMethod,
 					"operation_id":       lock.OperationID(),
 				}, nil
 			}
@@ -96,11 +141,31 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 		}
 		succeeded = true
 
-		return gin.H{
-			"message":      "Update completed. Please restart the service.",
-			"need_restart": true,
+		info, _ := h.updateSvc.CheckUpdate(ctx, false)
+		msg := "Update completed. Please restart the service."
+		needRestart := true
+		resp := gin.H{
+			"message":      msg,
+			"need_restart": needRestart,
 			"operation_id": lock.OperationID(),
-		}, nil
+		}
+		if info != nil {
+			resp["channel"] = info.Channel
+			resp["update_method"] = info.UpdateMethod
+			if info.Channel == service.UpdateChannelCustom && info.UpdateMethod == service.UpdateMethodDocker {
+				resp["message"] = "Pending image tag recorded. Pull/recreate the container (or apply pending_image_tag) then restart."
+				if info.LatestTag != "" {
+					resp["latest_tag"] = info.LatestTag
+				}
+				if info.Image != "" {
+					resp["image"] = info.Image
+				}
+				if info.ManualCommand != "" {
+					resp["manual_command"] = info.ManualCommand
+				}
+			}
+		}
+		return resp, nil
 	})
 }
 

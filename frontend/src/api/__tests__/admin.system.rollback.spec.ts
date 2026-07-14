@@ -1,23 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { get, post } = vi.hoisted(() => ({
+const { get, post, put } = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  put: vi.fn(),
 }))
 
 vi.mock('../client', () => ({
   apiClient: {
     get,
     post,
+    put,
   },
 }))
 
-import { getRollbackVersions, rollback, type RollbackVersionInfo } from '@/api/admin/system'
+import {
+  getRollbackVersions,
+  rollback,
+  getUpdateChannel,
+  setUpdateChannel,
+  type RollbackVersionInfo
+} from '@/api/admin/system'
 
 describe('admin system rollback API', () => {
   beforeEach(() => {
     get.mockReset()
     post.mockReset()
+    put.mockReset()
   })
 
   it('getRollbackVersions fetches the rollback version list', async () => {
@@ -51,5 +60,30 @@ describe('admin system rollback API', () => {
     await rollback()
 
     expect(post).toHaveBeenCalledWith('/admin/system/rollback', undefined)
+  })
+})
+
+describe('admin system update channel API', () => {
+  beforeEach(() => {
+    get.mockReset()
+    put.mockReset()
+  })
+
+  it('getUpdateChannel fetches the current channel', async () => {
+    get.mockResolvedValue({ data: { channel: 'custom' } })
+
+    const result = await getUpdateChannel()
+
+    expect(get).toHaveBeenCalledWith('/admin/system/update-channel')
+    expect(result.channel).toBe('custom')
+  })
+
+  it('setUpdateChannel puts the channel in the request body', async () => {
+    put.mockResolvedValue({ data: { channel: 'official' } })
+
+    const result = await setUpdateChannel('official')
+
+    expect(put).toHaveBeenCalledWith('/admin/system/update-channel', { channel: 'official' })
+    expect(result.channel).toBe('official')
   })
 })

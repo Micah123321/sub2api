@@ -44,21 +44,60 @@
             <button
               @click="refreshVersion(true)"
               class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-dark-200"
-              :disabled="loading"
+              :disabled="loading || switchingChannel"
               :title="t('version.refresh')"
             >
               <Icon
                 name="refresh"
                 size="sm"
                 :stroke-width="2"
-                :class="{ 'animate-spin': loading }"
+                :class="{ 'animate-spin': loading || switchingChannel }"
               />
             </button>
           </div>
 
+          <!-- Update channel switcher -->
+          <div
+            class="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-dark-700"
+          >
+            <span class="text-xs text-gray-500 dark:text-dark-400">{{
+              t('version.updateChannel')
+            }}</span>
+            <div
+              class="flex items-center gap-0.5 rounded-md bg-gray-100 p-0.5 dark:bg-dark-700"
+            >
+              <button
+                type="button"
+                @click="switchChannel('official')"
+                :disabled="switchingChannel || loading"
+                class="rounded px-2 py-0.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                :class="
+                  !isCustomChannel
+                    ? 'bg-white text-gray-700 shadow-sm dark:bg-dark-800 dark:text-dark-100'
+                    : 'text-gray-400 hover:text-gray-600 dark:text-dark-400 dark:hover:text-dark-200'
+                "
+              >
+                {{ t('version.channelOfficial') }}
+              </button>
+              <button
+                type="button"
+                @click="switchChannel('custom')"
+                :disabled="switchingChannel || loading"
+                class="rounded px-2 py-0.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                :class="
+                  isCustomChannel
+                    ? 'bg-white text-gray-700 shadow-sm dark:bg-dark-800 dark:text-dark-100'
+                    : 'text-gray-400 hover:text-gray-600 dark:text-dark-400 dark:hover:text-dark-200'
+                "
+              >
+                {{ t('version.channelCustom') }}
+              </button>
+            </div>
+          </div>
+
           <div class="p-4">
             <!-- Loading state -->
-            <div v-if="loading" class="flex items-center justify-center py-6">
+            <div v-if="loading || switchingChannel" class="flex items-center justify-center py-6">
               <svg class="h-6 w-6 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24">
                 <circle
                   class="opacity-25"
@@ -141,8 +180,8 @@
 
                 <!-- Retry button -->
                 <button
-                  @click="handleUpdate"
-                  :disabled="updating"
+                  @click="lastErrorKind === 'channel' && pendingChannel ? switchChannel(pendingChannel) : handleUpdate()"
+                  :disabled="updating || switchingChannel"
                   class="flex w-full items-center justify-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {{ t('version.retry') }}
@@ -291,7 +330,7 @@
                 </div>
               </div>
 
-              <!-- Priority 4: Update available for release build - show update button -->
+              <!-- Priority 4: Update available for release build - show update button or manual command -->
               <div v-else-if="hasUpdate && isReleaseBuild" class="space-y-2">
                 <!-- Update info card -->
                 <div
@@ -317,8 +356,62 @@
                   </div>
                 </div>
 
-                <!-- Update button -->
+                <!-- Manual deployments: show command instead of one-click update -->
+                <template v-if="isManualUpdateMethod">
+                  <div
+                    class="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 dark:border-blue-800/50 dark:bg-blue-900/20"
+                  >
+                    <svg
+                      class="h-3.5 w-3.5 flex-shrink-0 text-blue-500 dark:text-blue-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <p class="text-xs text-blue-600 dark:text-blue-400">
+                      {{ t('version.nonDockerNoOneClick') }}
+                    </p>
+                  </div>
+
+                  <div
+                    v-if="displayedManualUpdateCommand"
+                    class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-600"
+                  >
+                    <div
+                      class="flex items-center justify-between border-b border-gray-200 bg-gray-100 px-2 py-1.5 dark:border-dark-600 dark:bg-dark-700"
+                    >
+                      <span class="text-[11px] font-medium text-gray-500 dark:text-dark-300">{{
+                        t('version.manualUpdateCommand')
+                      }}</span>
+                      <button
+                        @click="copyToClipboard(displayedManualUpdateCommand)"
+                        class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:text-dark-400 dark:hover:bg-dark-600 dark:hover:text-dark-200"
+                      >
+                        <Icon
+                          :name="copied ? 'check' : 'copy'"
+                          size="xs"
+                          :stroke-width="2"
+                          :class="copied ? 'text-green-500' : ''"
+                        />
+                        {{ copied ? t('version.copied') : t('version.copyCommand') }}
+                      </button>
+                    </div>
+                    <code
+                      class="block select-all whitespace-pre-wrap break-all bg-gray-50 p-2.5 font-mono text-[10px] leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-dark-300"
+                      >{{ displayedManualUpdateCommand }}</code
+                    >
+                  </div>
+                </template>
+
+                <!-- Binary / docker one-click: Update button -->
                 <button
+                  v-else
                   @click="handleUpdate"
                   :disabled="updating"
                   class="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -646,14 +739,17 @@ import {
   restartService,
   getRollbackVersions,
   rollback as rollbackAPI,
-  type RollbackVersionInfo
+  type RollbackVersionInfo,
+  type UpdateChannel
 } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
 // Docker Hub image published by CI (tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146)
-const DOCKER_IMAGE = 'weishaw/sub2api'
+const DOCKER_IMAGE_OFFICIAL = 'weishaw/sub2api'
+// Custom-channel GHCR image (fallback when backend does not report image)
+const DOCKER_IMAGE_CUSTOM = 'ghcr.io/micah123321/sub2api'
 
 const { t } = useI18n()
 
@@ -676,12 +772,20 @@ const latestVersion = computed(() => appStore.latestVersion)
 const hasUpdate = computed(() => appStore.hasUpdate)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)
+const updateChannel = computed(() => (appStore.updateChannel || 'official') as UpdateChannel | string)
+const updateMethod = computed(() => appStore.updateMethod || '')
+const storeImage = computed(() => appStore.updateImage || '')
+const latestTag = computed(() => appStore.latestTag || '')
+const storeManualCommand = computed(() => appStore.manualCommand || '')
 
 // Update process states (local to this component)
 const updating = ref(false)
+const switchingChannel = ref(false)
+const pendingChannel = ref<UpdateChannel | null>(null)
 const restarting = ref(false)
 const needRestart = ref(false)
 const updateError = ref('')
+const lastErrorKind = ref<'update' | 'channel'>('update')
 const updateSuccess = ref(false)
 const restartCountdown = ref(0)
 // Distinguishes the success + restart panel between update and rollback flows
@@ -707,6 +811,21 @@ const manualTabs = computed(() => [
   { key: 'docker' as const, label: t('version.deployDocker') }
 ])
 
+const isCustomChannel = computed(() => updateChannel.value === 'custom')
+const isManualUpdateMethod = computed(() => updateMethod.value === 'manual')
+
+const dockerImage = computed(() => {
+  if (storeImage.value) return storeImage.value
+  return isCustomChannel.value ? DOCKER_IMAGE_CUSTOM : DOCKER_IMAGE_OFFICIAL
+})
+
+const dockerRollbackTag = computed(() => {
+  if (selectedRollbackVersion.value) return selectedRollbackVersion.value
+  if (latestTag.value) return latestTag.value
+  // Custom channel default tags when backend does not report a specific tag
+  return isCustomChannel.value ? 'custom' : 'latest'
+})
+
 const scriptRollbackCommand = computed(() => {
   if (!selectedRollbackVersion.value) return ''
   const tag = `v${selectedRollbackVersion.value}`
@@ -714,10 +833,10 @@ const scriptRollbackCommand = computed(() => {
 })
 
 const dockerRollbackCommand = computed(() => {
-  if (!selectedRollbackVersion.value) return ''
+  if (!selectedRollbackVersion.value && !isCustomChannel.value) return ''
   return [
     `# ${t('version.dockerEditCompose')}`,
-    `image: ${DOCKER_IMAGE}:${selectedRollbackVersion.value}`,
+    `image: ${dockerImage.value}:${dockerRollbackTag.value}`,
     '',
     `# ${t('version.dockerRecreate')}`,
     'docker compose up -d'
@@ -728,8 +847,49 @@ const activeManualCommand = computed(() =>
   manualTab.value === 'docker' ? dockerRollbackCommand.value : scriptRollbackCommand.value
 )
 
-// Only show update check for release builds (binary/docker deployment)
+// Manual update command from backend, or a docker fallback for custom channel
+const displayedManualUpdateCommand = computed(() => {
+  if (storeManualCommand.value) return storeManualCommand.value
+  if (isCustomChannel.value || updateMethod.value === 'docker') {
+    const tag = latestTag.value || (isCustomChannel.value ? 'custom' : latestVersion.value || 'latest')
+    return [
+      `# ${t('version.dockerEditCompose')}`,
+      `image: ${dockerImage.value}:${tag}`,
+      '',
+      `# ${t('version.dockerRecreate')}`,
+      'docker compose up -d'
+    ].join('\n')
+  }
+  return ''
+})
+
+// Only show one-click update for release builds (binary/docker deployment)
 const isReleaseBuild = computed(() => buildType.value === 'release')
+
+async function switchChannel(channel: UpdateChannel) {
+  if (switchingChannel.value) return
+  if (updateChannel.value === channel && !updateError.value) return
+
+  switchingChannel.value = true
+  pendingChannel.value = channel
+  lastErrorKind.value = 'update'
+  updateError.value = ''
+  updateSuccess.value = false
+  needRestart.value = false
+  resetRollbackState()
+
+  try {
+    const ok = await appStore.setUpdateChannel(channel)
+    if (!ok) {
+      lastErrorKind.value = 'channel'
+      updateError.value = t('version.channelSwitchFailed')
+    } else {
+      pendingChannel.value = null
+    }
+  } finally {
+    switchingChannel.value = false
+  }
+}
 
 function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
@@ -755,6 +915,7 @@ async function handleUpdate() {
   if (updating.value) return
 
   updating.value = true
+  lastErrorKind.value = 'update'
   updateError.value = ''
   updateSuccess.value = false
 

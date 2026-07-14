@@ -63,11 +63,14 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
 // Mock API 模块
 vi.mock('@/api/admin/system', () => ({
   checkUpdates: vi.fn(),
+  setUpdateChannel: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
   getPublicSettings: vi.fn(),
 }))
+
+import { checkUpdates, setUpdateChannel } from '@/api/admin/system'
 
 describe('useAppStore', () => {
   beforeEach(() => {
@@ -75,6 +78,8 @@ describe('useAppStore', () => {
     vi.useFakeTimers()
     localStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(checkUpdates).mockReset()
+    vi.mocked(setUpdateChannel).mockReset()
     // 清除 window.__APP_CONFIG__
     delete (window as any).__APP_CONFIG__
   })
@@ -469,6 +474,101 @@ describe('useAppStore', () => {
       expect((window as any).__APP_CONFIG__.table_page_size_options).toEqual([20, 100, 1000])
       expect(localStorage.getItem('table-page-size')).toBeNull()
       expect(localStorage.getItem('table-page-size-source')).toBeNull()
+    })
+  })
+
+  // --- 版本 / 更新通道 ---
+
+  describe('版本与更新通道', () => {
+    it('fetchVersion 写入双通道扩展字段', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: '0.1.150',
+        latest_version: '0.1.155',
+        has_update: true,
+        build_type: 'release',
+        cached: false,
+        channel: 'custom',
+        update_method: 'docker',
+        image: 'ghcr.io/micah123321/sub2api',
+        latest_tag: 'custom',
+        manual_command: 'docker compose pull',
+        digest: 'sha256:abc'
+      })
+
+      const store = useAppStore()
+      const data = await store.fetchVersion(true)
+
+      expect(data?.has_update).toBe(true)
+      expect(store.currentVersion).toBe('0.1.150')
+      expect(store.latestVersion).toBe('0.1.155')
+      expect(store.updateChannel).toBe('custom')
+      expect(store.updateMethod).toBe('docker')
+      expect(store.updateImage).toBe('ghcr.io/micah123321/sub2api')
+      expect(store.latestTag).toBe('custom')
+      expect(store.manualCommand).toBe('docker compose pull')
+      expect(store.updateDigest).toBe('sha256:abc')
+    })
+
+    it('fetchVersion 在后端缺少扩展字段时保持兼容', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: '0.1.150',
+        latest_version: '0.1.150',
+        has_update: false,
+        build_type: 'release',
+        cached: false
+      })
+
+      const store = useAppStore()
+      await store.fetchVersion(true)
+
+      expect(store.updateChannel).toBe('official')
+      expect(store.updateMethod).toBe('')
+      expect(store.updateImage).toBe('')
+      expect(store.latestTag).toBe('')
+      expect(store.manualCommand).toBe('')
+    })
+
+    it('setUpdateChannel 调用 API 后清缓存并强制刷新版本', async () => {
+      vi.mocked(setUpdateChannel).mockResolvedValue({ channel: 'custom' })
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: '0.1.150',
+        latest_version: '0.1.160',
+        has_update: true,
+        build_type: 'release',
+        cached: false,
+        channel: 'custom',
+        update_method: 'manual',
+        image: 'ghcr.io/micah123321/sub2api',
+        latest_tag: 'custom-sha'
+      })
+
+      const store = useAppStore()
+      // seed cache
+      store.versionLoaded = true
+      store.hasUpdate = false
+      store.updateChannel = 'official'
+
+      const ok = await store.setUpdateChannel('custom')
+
+      expect(ok).toBe(true)
+      expect(setUpdateChannel).toHaveBeenCalledWith('custom')
+      expect(checkUpdates).toHaveBeenCalledWith(true)
+      expect(store.updateChannel).toBe('custom')
+      expect(store.updateMethod).toBe('manual')
+      expect(store.latestTag).toBe('custom-sha')
+      expect(store.hasUpdate).toBe(true)
+    })
+
+    it('setUpdateChannel 失败时返回 false 且不崩溃', async () => {
+      vi.mocked(setUpdateChannel).mockRejectedValue(new Error('network'))
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+      const store = useAppStore()
+      const ok = await store.setUpdateChannel('custom')
+
+      expect(ok).toBe(false)
+      expect(store.updateChannel).toBe('official')
+      consoleError.mockRestore()
     })
   })
 })

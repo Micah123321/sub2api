@@ -11,6 +11,9 @@ export interface ReleaseInfo {
   html_url: string
 }
 
+export type UpdateChannel = 'official' | 'custom'
+export type UpdateMethod = 'binary' | 'docker' | 'manual'
+
 export interface VersionInfo {
   current_version: string
   latest_version: string
@@ -19,6 +22,17 @@ export interface VersionInfo {
   cached: boolean
   warning?: string
   build_type: string // "source" for manual builds, "release" for CI builds
+  // Dual update channel fields (optional for backward compatibility)
+  channel?: UpdateChannel | string
+  update_method?: UpdateMethod | string
+  image?: string
+  latest_tag?: string
+  manual_command?: string
+  digest?: string
+}
+
+export interface UpdateChannelInfo {
+  channel: UpdateChannel
 }
 
 /**
@@ -90,13 +104,33 @@ export async function restartService(): Promise<{ message: string }> {
   return data
 }
 
+/**
+ * Get current update channel (official | custom)
+ */
+export async function getUpdateChannel(): Promise<UpdateChannelInfo> {
+  const { data } = await apiClient.get<UpdateChannelInfo>('/admin/system/update-channel')
+  return data
+}
+
+/**
+ * Set update channel (official | custom)
+ */
+export async function setUpdateChannel(channel: UpdateChannel): Promise<UpdateChannelInfo> {
+  const { data } = await apiClient.put<UpdateChannelInfo>('/admin/system/update-channel', {
+    channel
+  })
+  return data
+}
+
 export const systemAPI = {
   getVersion,
   checkUpdates,
   performUpdate,
   getRollbackVersions,
   rollback,
-  restartService
+  restartService,
+  getUpdateChannel,
+  setUpdateChannel
 }
 
 export default systemAPI

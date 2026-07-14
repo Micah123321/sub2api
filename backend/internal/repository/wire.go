@@ -3,6 +3,8 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"os"
+	"strings"
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -29,6 +31,25 @@ func ProvideConcurrencyCache(rdb *redis.Client, cfg *config.Config) service.Conc
 // 从配置中读取代理设置，支持国内服务器通过代理访问 GitHub
 func ProvideGitHubReleaseClient(cfg *config.Config) service.GitHubReleaseClient {
 	return NewGitHubReleaseClient(cfg.Update.ProxyURL, cfg.Security.ProxyFallback.AllowDirectOnError)
+}
+
+// ProvideGHCRClient 创建 GHCR / GitHub Packages 客户端，用于 custom 更新通道。
+// 仅使用 update.ghcr_token 或 SUB2API_GHCR_TOKEN；不读取 GITHUB_TOKEN，避免误用 CI 宽权限令牌。
+func ProvideGHCRClient(cfg *config.Config) service.GHCRClient {
+	token := ""
+	if cfg != nil {
+		token = strings.TrimSpace(cfg.Update.GHCRToken)
+	}
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("SUB2API_GHCR_TOKEN"))
+	}
+	proxyURL := ""
+	allowDirect := false
+	if cfg != nil {
+		proxyURL = cfg.Update.ProxyURL
+		allowDirect = cfg.Security.ProxyFallback.AllowDirectOnError
+	}
+	return NewGHCRClient(proxyURL, token, allowDirect)
 }
 
 // ProvidePricingRemoteClient 创建定价数据远程客户端
@@ -139,6 +160,7 @@ var ProviderSet = wire.NewSet(
 	NewTurnstileVerifier,
 	ProvidePricingRemoteClient,
 	ProvideGitHubReleaseClient,
+	ProvideGHCRClient,
 	NewProxyExitInfoProber,
 	NewClaudeUsageFetcher,
 	NewClaudeOAuthClient,

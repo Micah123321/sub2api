@@ -9,8 +9,11 @@ import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
+  setUpdateChannel as setUpdateChannelAPI,
   type VersionInfo,
-  type ReleaseInfo
+  type ReleaseInfo,
+  type UpdateChannel,
+  type UpdateMethod
 } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 
@@ -43,6 +46,13 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  // Dual update channel fields (populated from check-updates when available)
+  const updateChannel = ref<UpdateChannel | string>('official')
+  const updateMethod = ref<UpdateMethod | string>('')
+  const updateImage = ref<string>('')
+  const latestTag = ref<string>('')
+  const manualCommand = ref<string>('')
+  const updateDigest = ref<string>('')
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -236,10 +246,46 @@ export const useAppStore = defineStore('app', () => {
 
   // ==================== Version Management ====================
 
+  function applyVersionInfo(data: VersionInfo): void {
+    currentVersion.value = data.current_version
+    latestVersion.value = data.latest_version
+    hasUpdate.value = data.has_update
+    buildType.value = data.build_type || 'source'
+    releaseInfo.value = data.release_info || null
+    // Dual-channel fields: always reset from response so channel switches do not leak state.
+    // Missing/empty backend fields clear previous values rather than preserving them.
+    if (data.channel !== undefined && data.channel !== '') {
+      updateChannel.value = data.channel
+    }
+    updateMethod.value = data.update_method || ''
+    updateImage.value = data.image || ''
+    latestTag.value = data.latest_tag || ''
+    manualCommand.value = data.manual_command || ''
+    updateDigest.value = data.digest || ''
+    versionLoaded.value = true
+  }
+
   /**
    * Fetch version info (uses cache unless force=true)
    * @param force - Force refresh from API
    */
+  // Monotonic token so in-flight older check-updates responses cannot overwrite a newer channel.
+  let versionFetchToken = 0
+  let versionFetchWaiters: Array<() => void> = []
+
+  function notifyVersionFetchIdle(): void {
+    const waiters = versionFetchWaiters
+    versionFetchWaiters = []
+    for (const resolve of waiters) resolve()
+  }
+
+  function waitForVersionFetchIdle(): Promise<void> {
+    if (!versionLoading.value) return Promise.resolve()
+    return new Promise((resolve) => {
+      versionFetchWaiters.push(resolve)
+    })
+  }
+
   async function fetchVersion(force = false): Promise<VersionInfo | null> {
     // Return cached data if available and not forcing refresh
     if (versionLoaded.value && !force) {
@@ -249,30 +295,43 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
-        cached: true
+        cached: true,
+        channel: updateChannel.value,
+        update_method: updateMethod.value || undefined,
+        image: updateImage.value || undefined,
+        latest_tag: latestTag.value || undefined,
+        manual_command: manualCommand.value || undefined,
+        digest: updateDigest.value || undefined
       }
     }
 
-    // Prevent duplicate requests
+    // Wait for in-flight request then re-check cache (force still revalidates).
     if (versionLoading.value) {
-      return null
+      await waitForVersionFetchIdle()
+      if (versionLoaded.value && !force) {
+        return fetchVersion(false)
+      }
     }
 
+    const token = ++versionFetchToken
     versionLoading.value = true
     try {
       const data = await checkUpdatesAPI(force)
-      currentVersion.value = data.current_version
-      latestVersion.value = data.latest_version
-      hasUpdate.value = data.has_update
-      buildType.value = data.build_type || 'source'
-      releaseInfo.value = data.release_info || null
-      versionLoaded.value = true
+      if (token !== versionFetchToken) {
+        return null
+      }
+      applyVersionInfo(data)
       return data
     } catch (error) {
-      console.error('Failed to fetch version:', error)
+      if (token === versionFetchToken) {
+        console.error('Failed to fetch version:', error)
+      }
       return null
     } finally {
-      versionLoading.value = false
+      if (token === versionFetchToken) {
+        versionLoading.value = false
+        notifyVersionFetchIdle()
+      }
     }
   }
 
@@ -282,6 +341,28 @@ export const useAppStore = defineStore('app', () => {
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    updateMethod.value = ''
+    updateImage.value = ''
+    latestTag.value = ''
+    manualCommand.value = ''
+    updateDigest.value = ''
+  }
+
+  /**
+   * Switch update channel and force-refresh version info.
+   */
+  async function setUpdateChannel(channel: UpdateChannel): Promise<boolean> {
+    try {
+      const result = await setUpdateChannelAPI(channel)
+      updateChannel.value = result.channel || channel
+      clearVersionCache()
+      const data = await fetchVersion(true)
+      // Treat refresh failure as unsuccessful switch from UI perspective so callers can retry.
+      return data !== null
+    } catch (error) {
+      console.error('Failed to set update channel:', error)
+      return false
+    }
   }
 
   // ==================== Public Settings Management ====================
@@ -451,6 +532,12 @@ export const useAppStore = defineStore('app', () => {
     hasUpdate,
     buildType,
     releaseInfo,
+    updateChannel,
+    updateMethod,
+    updateImage,
+    latestTag,
+    manualCommand,
+    updateDigest,
 
     // Computed
     hasActiveToasts,
@@ -476,6 +563,7 @@ export const useAppStore = defineStore('app', () => {
     // Version actions
     fetchVersion,
     clearVersionCache,
+    setUpdateChannel,
 
     // Public settings actions
     fetchPublicSettings,

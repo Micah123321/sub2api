@@ -56,7 +56,15 @@ export default {
     deployScript: 'Script',
     deployDocker: 'Docker',
     dockerEditCompose: 'Edit the image tag in docker-compose.yml',
-    dockerRecreate: 'Recreate the container'
+    dockerRecreate: 'Recreate the container',
+    updateChannel: 'Update Channel',
+    channelOfficial: 'Official',
+    channelCustom: 'Custom',
+    channelSwitchFailed: 'Failed to switch update channel',
+    channelSwitching: 'Switching...',
+    manualUpdateHint: 'One-click update is not available for this deployment. Update manually with the command below.',
+    manualUpdateCommand: 'Manual update command',
+    nonDockerNoOneClick: 'One-click update is unavailable outside Docker. Use the CLI to update manually.'
   },
 
   // Recharge / Subscription Page

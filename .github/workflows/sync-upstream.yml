@@ -17,6 +17,8 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
 
     steps:
       - name: Checkout custom branch
@@ -26,6 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: Merge upstream main
+        id: merge
         shell: bash
         run: |
           set -euo pipefail
@@ -36,5 +39,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          BEFORE="$(git rev-parse HEAD)"
           git merge --no-edit upstream/main
+          AFTER="$(git rev-parse HEAD)"
+
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "No new commits from upstream/main; skip push and image build."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git push origin HEAD:custom
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "Merged and pushed: ${BEFORE} -> ${AFTER}"
+
+  build-custom-image:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-custom-image.yml
+    with:
+      ref: custom

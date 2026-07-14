@@ -30,6 +30,10 @@ type systemHandlerUpdateServiceStub struct {
 	rollbackVersions     []service.RollbackVersion
 	rollbackVersionsErr  error
 	rollbackVersionsCall int
+	channel              string
+	setChannelErr        error
+	getChannelErr        error
+	setChannelCalls      []string
 }
 
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
@@ -56,6 +60,25 @@ func (s *systemHandlerUpdateServiceStub) RollbackToVersion(_ context.Context, ve
 	s.rollbackToCall++
 	s.rollbackToVersions = append(s.rollbackToVersions, version)
 	return s.rollbackToErr
+}
+
+func (s *systemHandlerUpdateServiceStub) GetChannel(context.Context) (string, error) {
+	if s.getChannelErr != nil {
+		return "", s.getChannelErr
+	}
+	if s.channel == "" {
+		return service.UpdateChannelOfficial, nil
+	}
+	return s.channel, nil
+}
+
+func (s *systemHandlerUpdateServiceStub) SetChannel(_ context.Context, channel string) error {
+	s.setChannelCalls = append(s.setChannelCalls, channel)
+	if s.setChannelErr != nil {
+		return s.setChannelErr
+	}
+	s.channel = channel
+	return nil
 }
 
 type systemUpdateResponseEnvelope struct {
@@ -93,6 +116,9 @@ func newSystemHandlerTestRouter(t *testing.T, updateSvc *systemHandlerUpdateServ
 	router.POST("/api/v1/admin/system/update", handler.PerformUpdate)
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
 	router.GET("/api/v1/admin/system/rollback-versions", handler.GetRollbackVersions)
+	router.GET("/api/v1/admin/system/update-channel", handler.GetUpdateChannel)
+	router.PUT("/api/v1/admin/system/update-channel", handler.SetUpdateChannel)
+	router.GET("/api/v1/admin/system/check-updates", handler.CheckUpdates)
 	return router
 }
 
@@ -264,4 +290,63 @@ func TestSystemHandlerGetRollbackVersionsError(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestSystemHandlerUpdateChannelGetAndSet(t *testing.T) {
+	updateSvc := &systemHandlerUpdateServiceStub{channel: service.UpdateChannelOfficial}
+	repo := newMemoryIdempotencyRepoStub()
+	router := newSystemHandlerTestRouter(t, updateSvc, repo)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/update-channel", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/system/update-channel",
+		strings.NewReader(`{"channel":"custom"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{"custom"}, updateSvc.setChannelCalls)
+
+	var body struct {
+		Code int `json:"code"`
+		Data struct {
+			Channel string `json:"channel"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "custom", body.Data.Channel)
+}
+
+func TestSystemHandlerCheckUpdatesReturnsChannelFields(t *testing.T) {
+	updateSvc := &systemHandlerUpdateServiceStub{
+		updateInfo: &service.UpdateInfo{
+			CurrentVersion: "0.1.147",
+			LatestVersion:  "custom",
+			HasUpdate:      true,
+			Channel:        service.UpdateChannelCustom,
+			UpdateMethod:   service.UpdateMethodManual,
+			Image:          "ghcr.io/micah123321/sub2api",
+			LatestTag:      "custom",
+			ManualCommand:  "docker pull ghcr.io/micah123321/sub2api:custom",
+		},
+	}
+	repo := newMemoryIdempotencyRepoStub()
+	router := newSystemHandlerTestRouter(t, updateSvc, repo)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/check-updates", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body struct {
+		Code int                 `json:"code"`
+		Data service.UpdateInfo  `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, service.UpdateChannelCustom, body.Data.Channel)
+	require.Equal(t, service.UpdateMethodManual, body.Data.UpdateMethod)
+	require.Equal(t, "custom", body.Data.LatestTag)
 }

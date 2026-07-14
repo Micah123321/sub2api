@@ -19,22 +19,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 var (
 	ErrNoUpdateAvailable         = infraerrors.Conflict("ALREADY_UP_TO_DATE", "no update available; current version is latest")
 	ErrRollbackVersionNotAllowed = infraerrors.BadRequest("ROLLBACK_VERSION_NOT_ALLOWED", "version is not in the allowed rollback list")
+	ErrCustomUpdateNotDocker     = infraerrors.BadRequest("CUSTOM_UPDATE_REQUIRES_DOCKER", "custom channel update requires Docker runtime; use docker pull manually")
+	ErrInvalidUpdateChannel      = infraerrors.BadRequest("INVALID_UPDATE_CHANNEL", "update channel must be official or custom")
 )
 
 const (
-	updateCacheKey = "update_check_cache"
-	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+	updateCacheKeyPrefix = "update_check_cache"
+	updateCacheTTL       = 1200 // 20 minutes
+	defaultOfficialRepo  = "Wei-Shaw/sub2api"
+	defaultCustomImage   = "ghcr.io/micah123321/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
 	allowedAssetHost    = "objects.githubusercontent.com"
+	allowedGHCRHost     = "ghcr.io"
 
 	// Security: max download size (500MB)
 	maxDownloadSize = 500 * 1024 * 1024
@@ -43,12 +48,24 @@ const (
 	maxRollbackVersions = 3
 	// Fetch a few extra releases so filtering (current/newer/prerelease) still leaves enough candidates
 	rollbackFetchPageSize = 15
+
+	// Channel values
+	UpdateChannelOfficial = "official"
+	UpdateChannelCustom   = "custom"
+
+	// Update methods
+	UpdateMethodBinary = "binary"
+	UpdateMethodDocker = "docker"
+	UpdateMethodManual = "manual"
+
+	pendingImageFileName = "pending_image_tag"
 )
 
-// UpdateCache defines cache operations for update service
+// UpdateCache defines cache operations for update service.
+// key isolates channels, e.g. "update_check_cache:official".
 type UpdateCache interface {
-	GetUpdateInfo(ctx context.Context) (string, error)
-	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
+	GetUpdateInfo(ctx context.Context, key string) (string, error)
+	SetUpdateInfo(ctx context.Context, key, data string, ttl time.Duration) error
 }
 
 // GitHubReleaseClient 获取 GitHub release 信息的接口
@@ -59,21 +76,98 @@ type GitHubReleaseClient interface {
 	FetchChecksumFile(ctx context.Context, url string) ([]byte, error)
 }
 
+// GHCRImageTag represents a container image tag from GHCR / Packages API.
+type GHCRImageTag struct {
+	Tag       string `json:"tag"`
+	Digest    string `json:"digest,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	HTMLURL   string `json:"html_url,omitempty"`
+}
+
+// GHCRClient lists tags for a GHCR image.
+type GHCRClient interface {
+	ListImageTags(ctx context.Context, image string) ([]GHCRImageTag, error)
+}
+
 // UpdateService handles software updates
 type UpdateService struct {
 	cache          UpdateCache
 	githubClient   GitHubReleaseClient
+	ghcrClient     GHCRClient
+	settingRepo    SettingRepository
 	currentVersion string
 	buildType      string // "source" for manual builds, "release" for CI builds
+	currentCommit  string
+	officialRepo   string
+	customImage    string
+	dataDir        string
+
+	// test hooks
+	isDockerEnvFn func() bool
+	dataDirFn     func() string
+}
+
+// UpdateServiceOptions carries optional dependencies for UpdateService construction.
+type UpdateServiceOptions struct {
+	SettingRepo  SettingRepository
+	GHCRClient   GHCRClient
+	OfficialRepo string
+	CustomImage  string
+	CurrentCommit string
+	DataDir      string
+	Config       *config.Config
 }
 
 // NewUpdateService creates a new UpdateService
 func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string) *UpdateService {
+	return NewUpdateServiceWithOptions(cache, githubClient, version, buildType, UpdateServiceOptions{})
+}
+
+// NewUpdateServiceWithOptions creates UpdateService with channel/config options.
+func NewUpdateServiceWithOptions(cache UpdateCache, githubClient GitHubReleaseClient, version, buildType string, opts UpdateServiceOptions) *UpdateService {
+	officialRepo := strings.TrimSpace(opts.OfficialRepo)
+	customImage := strings.TrimSpace(opts.CustomImage)
+	dataDir := strings.TrimSpace(opts.DataDir)
+	if opts.Config != nil {
+		if officialRepo == "" {
+			officialRepo = strings.TrimSpace(opts.Config.Update.OfficialRepo)
+		}
+		if customImage == "" {
+			customImage = strings.TrimSpace(opts.Config.Update.CustomImage)
+		}
+	}
+	if envImage := strings.TrimSpace(os.Getenv("SUB2API_CUSTOM_IMAGE")); envImage != "" {
+		customImage = envImage
+	}
+	if officialRepo == "" {
+		officialRepo = defaultOfficialRepo
+	}
+	if customImage == "" {
+		customImage = defaultCustomImage
+	}
+	if dataDir == "" {
+		// Prefer DATA_DIR; fall back to Docker volume path /app/data when present,
+		// then current directory (matches setup.GetDataDir semantics without importing setup).
+		if envDir := strings.TrimSpace(os.Getenv("DATA_DIR")); envDir != "" {
+			dataDir = envDir
+		} else if info, err := os.Stat("/app/data"); err == nil && info.IsDir() {
+			dataDir = "/app/data"
+		} else {
+			dataDir = "."
+		}
+	}
+
 	return &UpdateService{
 		cache:          cache,
 		githubClient:   githubClient,
+		ghcrClient:     opts.GHCRClient,
+		settingRepo:    opts.SettingRepo,
 		currentVersion: version,
 		buildType:      buildType,
+		currentCommit:  strings.TrimSpace(opts.CurrentCommit),
+		officialRepo:   officialRepo,
+		customImage:    customImage,
+		dataDir:        dataDir,
 	}
 }
 
@@ -86,6 +180,12 @@ type UpdateInfo struct {
 	Cached         bool         `json:"cached"`
 	Warning        string       `json:"warning,omitempty"`
 	BuildType      string       `json:"build_type"` // "source" or "release"
+	Channel        string       `json:"channel,omitempty"`
+	UpdateMethod   string       `json:"update_method,omitempty"` // binary | docker | manual
+	Image          string       `json:"image,omitempty"`
+	LatestTag      string       `json:"latest_tag,omitempty"`
+	Digest         string       `json:"digest,omitempty"`
+	ManualCommand  string       `json:"manual_command,omitempty"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -118,9 +218,12 @@ type GitHubRelease struct {
 
 // RollbackVersion describes a release version the system can roll back to
 type RollbackVersion struct {
-	Version     string `json:"version"` // without "v" prefix, e.g. "0.1.146"
+	Version     string `json:"version"` // without "v" prefix, e.g. "0.1.146" or custom tag
 	PublishedAt string `json:"published_at"`
 	HTMLURL     string `json:"html_url"`
+	Tag         string `json:"tag,omitempty"`
+	Digest      string `json:"digest,omitempty"`
+	Image       string `json:"image,omitempty"`
 }
 
 type GitHubAsset struct {
@@ -129,20 +232,57 @@ type GitHubAsset struct {
 	Size               int64  `json:"size"`
 }
 
+// GetChannel returns the configured update channel (default official).
+func (s *UpdateService) GetChannel(ctx context.Context) (string, error) {
+	if s.settingRepo == nil {
+		return UpdateChannelOfficial, nil
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyUpdateChannel)
+	if err != nil {
+		if errorsIsSettingNotFound(err) {
+			return UpdateChannelOfficial, nil
+		}
+		return "", err
+	}
+	return normalizeUpdateChannel(value), nil
+}
+
+// SetChannel persists the update channel.
+func (s *UpdateService) SetChannel(ctx context.Context, channel string) error {
+	normalized, err := parseUpdateChannel(channel)
+	if err != nil {
+		return err
+	}
+	if s.settingRepo == nil {
+		return infraerrors.InternalServer("SETTING_REPO_UNAVAILABLE", "setting repository is not configured")
+	}
+	return s.settingRepo.Set(ctx, SettingKeyUpdateChannel, normalized)
+}
+
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	channel, err := s.GetChannel(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// Try cache first
 	if !force {
-		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
+		if cached, err := s.getFromCache(ctx, channel); err == nil && cached != nil {
 			return cached, nil
 		}
 	}
 
-	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx)
+	var info *UpdateInfo
+	switch channel {
+	case UpdateChannelCustom:
+		info, err = s.fetchLatestCustom(ctx)
+	default:
+		info, err = s.fetchLatestRelease(ctx)
+	}
 	if err != nil {
 		// Return cached on error
-		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
+		if cached, cacheErr := s.getFromCache(ctx, channel); cacheErr == nil && cached != nil {
 			cached.Warning = "Using cached data: " + err.Error()
 			return cached, nil
 		}
@@ -152,27 +292,73 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 			HasUpdate:      false,
 			Warning:        err.Error(),
 			BuildType:      s.buildType,
+			Channel:        channel,
+			UpdateMethod:   s.detectUpdateMethod(channel),
+			Image:          s.imageForChannel(channel),
 		}, nil
 	}
 
 	// Cache result
-	s.saveToCache(ctx, info)
+	s.saveToCache(ctx, channel, info)
 	return info, nil
 }
 
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
+	channel, err := s.GetChannel(ctx)
+	if err != nil {
+		return err
+	}
 	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
 	}
-
 	if !info.HasUpdate {
 		return ErrNoUpdateAvailable
 	}
 
-	return s.applyReleaseAssets(ctx, info.ReleaseInfo.Assets)
+	switch channel {
+	case UpdateChannelCustom:
+		return s.performCustomUpdate(ctx, info)
+	default:
+		if info.ReleaseInfo == nil {
+			return fmt.Errorf("missing release assets for official update")
+		}
+		return s.applyReleaseAssets(ctx, info.ReleaseInfo.Assets)
+	}
+}
+
+func (s *UpdateService) performCustomUpdate(ctx context.Context, info *UpdateInfo) error {
+	tag := strings.TrimSpace(info.LatestTag)
+	if tag == "" {
+		tag = strings.TrimSpace(info.LatestVersion)
+	}
+	if tag == "" {
+		return fmt.Errorf("missing custom image tag")
+	}
+	imageRef := s.customImage + ":" + tag
+
+	if !s.isDockerEnv() {
+		cmd := fmt.Sprintf("docker pull %s", imageRef)
+		return ErrCustomUpdateNotDocker.WithMetadata(map[string]string{
+			"update_method":  UpdateMethodManual,
+			"manual_command": cmd,
+			"image":          imageRef,
+		})
+	}
+
+	// Minimal docker update: record pending image tag for orchestrator / restart script.
+	if err := s.writePendingImageTag(imageRef); err != nil {
+		cmd := fmt.Sprintf("docker pull %s", imageRef)
+		return infraerrors.InternalServer("CUSTOM_UPDATE_PENDING_WRITE_FAILED", err.Error()).
+			WithMetadata(map[string]string{
+				"update_method":  UpdateMethodManual,
+				"manual_command": cmd,
+				"image":          imageRef,
+			})
+	}
+	return nil
 }
 
 // applyReleaseAssets downloads the platform archive from the given release assets,
@@ -281,6 +467,19 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 // Rollback restores the previous version
 func (s *UpdateService) Rollback() error {
+	channel, err := s.GetChannel(context.Background())
+	if err != nil {
+		return err
+	}
+	if channel == UpdateChannelCustom {
+		if !s.isDockerEnv() {
+			return ErrCustomUpdateNotDocker.WithMetadata(map[string]string{
+				"update_method": UpdateMethodManual,
+			})
+		}
+		return infraerrors.BadRequest("CUSTOM_ROLLBACK_NEEDS_VERSION", "custom channel rollback requires an explicit version/tag")
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -307,6 +506,14 @@ func (s *UpdateService) Rollback() error {
 // strictly older than the current version (the current version itself is excluded),
 // newest first. Draft and prerelease entries are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
+	channel, err := s.GetChannel(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if channel == UpdateChannelCustom {
+		return s.listCustomRollbackVersions(ctx)
+	}
+
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
 		return nil, err
@@ -327,9 +534,17 @@ func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVer
 // The target must be one of the versions returned by ListRollbackVersions;
 // anything else (including the current version) is rejected.
 func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) error {
+	channel, err := s.GetChannel(ctx)
+	if err != nil {
+		return err
+	}
 	target := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	if target == "" {
 		return ErrRollbackVersionNotAllowed
+	}
+
+	if channel == UpdateChannelCustom {
+		return s.rollbackCustomToVersion(ctx, target)
 	}
 
 	releases, err := s.fetchRollbackCandidates(ctx)
@@ -360,10 +575,51 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 	return s.applyReleaseAssets(ctx, assets)
 }
 
+func (s *UpdateService) rollbackCustomToVersion(ctx context.Context, target string) error {
+	versions, err := s.listCustomRollbackVersions(ctx)
+	if err != nil {
+		return err
+	}
+	var match *RollbackVersion
+	for i := range versions {
+		v := versions[i]
+		if v.Version == target || v.Tag == target {
+			match = &v
+			break
+		}
+	}
+	if match == nil {
+		return ErrRollbackVersionNotAllowed
+	}
+	tag := match.Tag
+	if tag == "" {
+		tag = match.Version
+	}
+	imageRef := s.customImage + ":" + tag
+	if !s.isDockerEnv() {
+		cmd := fmt.Sprintf("docker pull %s", imageRef)
+		return ErrCustomUpdateNotDocker.WithMetadata(map[string]string{
+			"update_method":  UpdateMethodManual,
+			"manual_command": cmd,
+			"image":          imageRef,
+		})
+	}
+	if err := s.writePendingImageTag(imageRef); err != nil {
+		cmd := fmt.Sprintf("docker pull %s", imageRef)
+		return infraerrors.InternalServer("CUSTOM_UPDATE_PENDING_WRITE_FAILED", err.Error()).
+			WithMetadata(map[string]string{
+				"update_method":  UpdateMethodManual,
+				"manual_command": cmd,
+				"image":          imageRef,
+			})
+	}
+	return nil
+}
+
 // fetchRollbackCandidates fetches recent releases and keeps the newest
 // maxRollbackVersions entries strictly older than the current version.
 func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubRelease, error) {
-	releases, err := s.githubClient.FetchRecentReleases(ctx, githubRepo, rollbackFetchPageSize)
+	releases, err := s.githubClient.FetchRecentReleases(ctx, s.officialRepo, rollbackFetchPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +656,7 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 }
 
 func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, error) {
-	release, err := s.githubClient.FetchLatestRelease(ctx, githubRepo)
+	release, err := s.githubClient.FetchLatestRelease(ctx, s.officialRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -427,9 +683,147 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 			HTMLURL:     release.HTMLURL,
 			Assets:      assets,
 		},
-		Cached:    false,
-		BuildType: s.buildType,
+		Cached:       false,
+		BuildType:    s.buildType,
+		Channel:      UpdateChannelOfficial,
+		UpdateMethod: s.detectUpdateMethod(UpdateChannelOfficial),
 	}, nil
+}
+
+func (s *UpdateService) fetchLatestCustom(ctx context.Context) (*UpdateInfo, error) {
+	if s.ghcrClient == nil {
+		return nil, fmt.Errorf("GHCR client is not configured")
+	}
+	tags, err := s.ghcrClient.ListImageTags(ctx, s.customImage)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := filterCustomTags(tags)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no custom tags found for image %s", s.customImage)
+	}
+
+	// Prefer floating "custom" tag as latest, else newest custom-<sha>
+	latest := pickLatestCustomTag(filtered)
+	method := s.detectUpdateMethod(UpdateChannelCustom)
+	manualCmd := ""
+	if method == UpdateMethodManual {
+		manualCmd = fmt.Sprintf("docker pull %s:%s", s.customImage, latest.Tag)
+	}
+
+	hasUpdate := s.customHasUpdate(latest)
+
+	return &UpdateInfo{
+		CurrentVersion: s.currentVersion,
+		LatestVersion:  latest.Tag,
+		HasUpdate:      hasUpdate,
+		ReleaseInfo: &ReleaseInfo{
+			Name:        latest.Tag,
+			Body:        "Custom channel image update",
+			PublishedAt: latest.UpdatedAt,
+			HTMLURL:     latest.HTMLURL,
+		},
+		Cached:        false,
+		BuildType:     s.buildType,
+		Channel:       UpdateChannelCustom,
+		UpdateMethod:  method,
+		Image:         s.customImage,
+		LatestTag:     latest.Tag,
+		Digest:        latest.Digest,
+		ManualCommand: manualCmd,
+	}, nil
+}
+
+func (s *UpdateService) listCustomRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
+	if s.ghcrClient == nil {
+		return nil, fmt.Errorf("GHCR client is not configured")
+	}
+	tags, err := s.ghcrClient.ListImageTags(ctx, s.customImage)
+	if err != nil {
+		return nil, err
+	}
+	filtered := filterCustomTags(tags)
+	// Prefer immutable custom-<sha> tags for rollback list; exclude floating "custom"
+	immutable := make([]GHCRImageTag, 0, len(filtered))
+	for _, t := range filtered {
+		if t.Tag == "custom" {
+			continue
+		}
+		if strings.HasPrefix(t.Tag, "custom-") {
+			immutable = append(immutable, t)
+		}
+	}
+	sortCustomTagsNewestFirst(immutable)
+
+	// Exclude current if identifiable
+	out := make([]RollbackVersion, 0, maxRollbackVersions)
+	for _, t := range immutable {
+		if s.isCurrentCustomTag(t) {
+			continue
+		}
+		out = append(out, RollbackVersion{
+			Version:     t.Tag,
+			PublishedAt: t.UpdatedAt,
+			HTMLURL:     t.HTMLURL,
+			Tag:         t.Tag,
+			Digest:      t.Digest,
+			Image:       s.customImage,
+		})
+		if len(out) >= maxRollbackVersions {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *UpdateService) customHasUpdate(latest GHCRImageTag) bool {
+	if latest.Tag == "" {
+		return false
+	}
+	// Floating tag: only claim update when we cannot prove current is already a custom build.
+	if latest.Tag == "custom" {
+		if s.currentCommit != "" {
+			if strings.Contains(s.currentVersion, shortCommit(s.currentCommit)) {
+				return false
+			}
+		}
+		if strings.Contains(s.currentVersion, "-custom.") || strings.Contains(s.currentVersion, "custom-") {
+			return false
+		}
+		return true
+	}
+	// Immutable custom-<sha>
+	if strings.HasPrefix(latest.Tag, "custom-") {
+		sha := strings.TrimPrefix(latest.Tag, "custom-")
+		if sha == "" {
+			return false
+		}
+		if s.currentCommit != "" && (strings.HasPrefix(s.currentCommit, sha) || strings.HasPrefix(sha, shortCommit(s.currentCommit))) {
+			return false
+		}
+		if strings.Contains(s.currentVersion, sha) {
+			return false
+		}
+		return true
+	}
+	return compareVersions(s.currentVersion, latest.Tag) < 0
+}
+
+func (s *UpdateService) isCurrentCustomTag(t GHCRImageTag) bool {
+	if t.Tag == "custom" {
+		return false
+	}
+	if strings.HasPrefix(t.Tag, "custom-") {
+		sha := strings.TrimPrefix(t.Tag, "custom-")
+		if s.currentCommit != "" && (strings.HasPrefix(s.currentCommit, sha) || strings.HasPrefix(sha, shortCommit(s.currentCommit))) {
+			return true
+		}
+		if strings.Contains(s.currentVersion, sha) {
+			return true
+		}
+	}
+	return t.Tag == s.currentVersion || strings.TrimPrefix(t.Tag, "v") == strings.TrimPrefix(s.currentVersion, "v")
 }
 
 func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
@@ -457,11 +851,14 @@ func validateDownloadURL(rawURL string) error {
 
 	// Check against allowed hosts
 	host := parsedURL.Host
-	// GitHub release URLs can be from github.com or objects.githubusercontent.com
+	// GitHub release URLs can be from github.com or objects.githubusercontent.com;
+	// GHCR blobs may use ghcr.io when custom channel needs direct layer access.
 	if host != allowedDownloadHost &&
 		!strings.HasSuffix(host, "."+allowedDownloadHost) &&
 		host != allowedAssetHost &&
-		!strings.HasSuffix(host, "."+allowedAssetHost) {
+		!strings.HasSuffix(host, "."+allowedAssetHost) &&
+		host != allowedGHCRHost &&
+		!strings.HasSuffix(host, "."+allowedGHCRHost) {
 		return fmt.Errorf("download from untrusted host: %s", host)
 	}
 
@@ -593,16 +990,26 @@ func (s *UpdateService) extractBinary(archivePath, destPath string) error {
 	return out.Close()
 }
 
-func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
-	data, err := s.cache.GetUpdateInfo(ctx)
+func (s *UpdateService) cacheKey(channel string) string {
+	return updateCacheKeyPrefix + ":" + normalizeUpdateChannel(channel)
+}
+
+func (s *UpdateService) getFromCache(ctx context.Context, channel string) (*UpdateInfo, error) {
+	data, err := s.cache.GetUpdateInfo(ctx, s.cacheKey(channel))
 	if err != nil {
 		return nil, err
 	}
 
 	var cached struct {
-		Latest      string       `json:"latest"`
-		ReleaseInfo *ReleaseInfo `json:"release_info"`
-		Timestamp   int64        `json:"timestamp"`
+		Latest        string       `json:"latest"`
+		ReleaseInfo   *ReleaseInfo `json:"release_info"`
+		Timestamp     int64        `json:"timestamp"`
+		Channel       string       `json:"channel"`
+		UpdateMethod  string       `json:"update_method"`
+		Image         string       `json:"image"`
+		LatestTag     string       `json:"latest_tag"`
+		Digest        string       `json:"digest"`
+		ManualCommand string       `json:"manual_command"`
 	}
 	if err := json.Unmarshal([]byte(data), &cached); err != nil {
 		return nil, err
@@ -612,32 +1019,125 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 		return nil, fmt.Errorf("cache expired")
 	}
 
+	ch := cached.Channel
+	if ch == "" {
+		ch = channel
+	}
+	method := cached.UpdateMethod
+	if method == "" {
+		method = s.detectUpdateMethod(ch)
+	}
+
+	hasUpdate := false
+	if ch == UpdateChannelCustom {
+		hasUpdate = s.customHasUpdate(GHCRImageTag{Tag: coalesceString(cached.LatestTag, cached.Latest), Digest: cached.Digest})
+	} else {
+		hasUpdate = compareVersions(s.currentVersion, cached.Latest) < 0
+	}
+
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
 		LatestVersion:  cached.Latest,
-		HasUpdate:      compareVersions(s.currentVersion, cached.Latest) < 0,
+		HasUpdate:      hasUpdate,
 		ReleaseInfo:    cached.ReleaseInfo,
 		Cached:         true,
 		BuildType:      s.buildType,
+		Channel:        ch,
+		UpdateMethod:   method,
+		Image:          cached.Image,
+		LatestTag:      coalesceString(cached.LatestTag, cached.Latest),
+		Digest:         cached.Digest,
+		ManualCommand:  cached.ManualCommand,
 	}, nil
 }
 
-func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
+func (s *UpdateService) saveToCache(ctx context.Context, channel string, info *UpdateInfo) {
 	cacheData := struct {
-		Latest      string       `json:"latest"`
-		ReleaseInfo *ReleaseInfo `json:"release_info"`
-		Timestamp   int64        `json:"timestamp"`
+		Latest        string       `json:"latest"`
+		ReleaseInfo   *ReleaseInfo `json:"release_info"`
+		Timestamp     int64        `json:"timestamp"`
+		Channel       string       `json:"channel"`
+		UpdateMethod  string       `json:"update_method"`
+		Image         string       `json:"image"`
+		LatestTag     string       `json:"latest_tag"`
+		Digest        string       `json:"digest"`
+		ManualCommand string       `json:"manual_command"`
 	}{
-		Latest:      info.LatestVersion,
-		ReleaseInfo: info.ReleaseInfo,
-		Timestamp:   time.Now().Unix(),
+		Latest:        info.LatestVersion,
+		ReleaseInfo:   info.ReleaseInfo,
+		Timestamp:     time.Now().Unix(),
+		Channel:       info.Channel,
+		UpdateMethod:  info.UpdateMethod,
+		Image:         info.Image,
+		LatestTag:     info.LatestTag,
+		Digest:        info.Digest,
+		ManualCommand: info.ManualCommand,
 	}
 
 	data, _ := json.Marshal(cacheData)
-	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
+	_ = s.cache.SetUpdateInfo(ctx, s.cacheKey(channel), string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
-// compareVersions compares two semantic versions
+func (s *UpdateService) detectUpdateMethod(channel string) string {
+	if channel == UpdateChannelCustom {
+		if s.isDockerEnv() {
+			return UpdateMethodDocker
+		}
+		return UpdateMethodManual
+	}
+	if s.isDockerEnv() {
+		// official docker still uses binary in-place update historically; keep binary
+		// unless explicitly forced. Leave as binary for compatibility.
+		return UpdateMethodBinary
+	}
+	return UpdateMethodBinary
+}
+
+func (s *UpdateService) imageForChannel(channel string) string {
+	if channel == UpdateChannelCustom {
+		return s.customImage
+	}
+	return ""
+}
+
+func (s *UpdateService) isDockerEnv() bool {
+	if s.isDockerEnvFn != nil {
+		return s.isDockerEnvFn()
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SUB2API_UPDATE_METHOD")), "docker") {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	return false
+}
+
+func (s *UpdateService) writePendingImageTag(imageRef string) error {
+	dir := s.dataDir
+	if s.dataDirFn != nil {
+		dir = s.dataDirFn()
+	}
+	if strings.TrimSpace(dir) == "" {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
+	path := filepath.Join(dir, pendingImageFileName)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(imageRef+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write pending image tag: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("commit pending image tag: %w", err)
+	}
+	return nil
+}
+
+// compareVersions compares two semantic versions (core x.y.z only).
+// Suffixes such as -custom.sha or -rc1 are ignored for core comparison.
 func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
@@ -654,7 +1154,7 @@ func compareVersions(current, latest string) int {
 }
 
 func parseVersion(v string) [3]int {
-	v = strings.TrimPrefix(v, "v")
+	v = coreSemver(v)
 	parts := strings.Split(v, ".")
 	result := [3]int{0, 0, 0}
 	for i := 0; i < len(parts) && i < 3; i++ {
@@ -663,4 +1163,97 @@ func parseVersion(v string) [3]int {
 		}
 	}
 	return result
+}
+
+func coreSemver(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	// drop pre-release / build metadata: 1.2.3-custom.abc -> 1.2.3
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	// custom-<sha> has no core semver
+	if !strings.Contains(v, ".") {
+		return ""
+	}
+	return v
+}
+
+func normalizeUpdateChannel(channel string) string {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case UpdateChannelCustom:
+		return UpdateChannelCustom
+	default:
+		return UpdateChannelOfficial
+	}
+}
+
+func parseUpdateChannel(channel string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case UpdateChannelOfficial, "":
+		return UpdateChannelOfficial, nil
+	case UpdateChannelCustom:
+		return UpdateChannelCustom, nil
+	default:
+		return "", ErrInvalidUpdateChannel
+	}
+}
+
+func errorsIsSettingNotFound(err error) bool {
+	return err != nil && (err == ErrSettingNotFound || infraerrors.IsNotFound(err) || strings.Contains(err.Error(), "setting not found"))
+}
+
+func filterCustomTags(tags []GHCRImageTag) []GHCRImageTag {
+	out := make([]GHCRImageTag, 0, len(tags))
+	for _, t := range tags {
+		tag := strings.TrimSpace(t.Tag)
+		if tag == "custom" || strings.HasPrefix(tag, "custom-") {
+			t.Tag = tag
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func pickLatestCustomTag(tags []GHCRImageTag) GHCRImageTag {
+	// Prefer floating "custom" if present
+	for _, t := range tags {
+		if t.Tag == "custom" {
+			return t
+		}
+	}
+	sortCustomTagsNewestFirst(tags)
+	if len(tags) == 0 {
+		return GHCRImageTag{}
+	}
+	return tags[0]
+}
+
+func sortCustomTagsNewestFirst(tags []GHCRImageTag) {
+	sort.SliceStable(tags, func(i, j int) bool {
+		ti, tj := tags[i].UpdatedAt, tags[j].UpdatedAt
+		if ti != "" && tj != "" && ti != tj {
+			// RFC3339 lexical order works for ISO timestamps
+			return ti > tj
+		}
+		// fallback: custom-<sha> lexicographic by tag (newest unknown)
+		return tags[i].Tag > tags[j].Tag
+	})
+}
+
+func shortCommit(commit string) string {
+	commit = strings.TrimSpace(commit)
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+	return commit
+}
+
+func coalesceString(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

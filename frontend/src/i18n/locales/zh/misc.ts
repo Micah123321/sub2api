@@ -55,7 +55,15 @@ export default {
     deployScript: '脚本部署',
     deployDocker: 'Docker',
     dockerEditCompose: '修改 docker-compose.yml 中的镜像版本',
-    dockerRecreate: '重新创建容器'
+    dockerRecreate: '重新创建容器',
+    updateChannel: '更新通道',
+    channelOfficial: '官方',
+    channelCustom: '自定义',
+    channelSwitchFailed: '切换更新通道失败',
+    channelSwitching: '切换中...',
+    manualUpdateHint: '当前部署方式不支持一键升级，请按下方命令手动更新',
+    manualUpdateCommand: '手动更新命令',
+    nonDockerNoOneClick: '非 Docker 环境不可一键升级，请使用命令行手动更新'
   },
 
   // Recharge / Subscription Page
