@@ -293,25 +293,37 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 
 ---
 
-### 方式二：Docker Compose（推荐）
+### 方式二：Docker Compose（推荐 · custom 通道）
 
-使用 Docker Compose 部署，包含 PostgreSQL 和 Redis 容器。
+使用 Docker Compose 部署本 fork 的 **custom** 镜像，包含 PostgreSQL 和 Redis 容器。
+
+默认镜像（GHCR）：
+
+```text
+ghcr.io/micah123321/sub2api:custom
+```
+
+浮动标签 `custom` 对应 custom 分支最新成功构建；也可钉死 `custom-<short_sha>`。
 
 #### 前置条件
 
 - Docker 20.10+
 - Docker Compose v2+
+- 能拉取 GHCR（公有包可直接 pull；私有包需 `docker login ghcr.io` 与 `SUB2API_GHCR_TOKEN`）
 
 #### 快速开始（一键部署）
 
-使用自动化部署脚本快速搭建：
+使用本仓库 custom 分支的自动化部署脚本：
 
 ```bash
 # 创建部署目录
 mkdir -p sub2api-deploy && cd sub2api-deploy
 
-# 下载并运行部署准备脚本
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+# 下载并运行部署准备脚本（从 custom 分支拉取 compose / .env 模板）
+curl -sSL https://raw.githubusercontent.com/Micah123321/sub2api/custom/deploy/docker-deploy.sh | bash
+
+# 若 GHCR 包为私有，先登录再启动
+# echo "$SUB2API_GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin
 
 # 启动服务
 docker compose up -d
@@ -321,32 +333,50 @@ docker compose logs -f sub2api
 ```
 
 **脚本功能：**
-- 下载 `docker-compose.local.yml`（本地保存为 `docker-compose.yml`）和 `.env.example`
+
+- 从 `Micah123321/sub2api@custom` 下载 `docker-compose.local.yml`（保存为 `docker-compose.yml`）和 `.env.example`
+- 默认写入 `SUB2API_IMAGE=ghcr.io/micah123321/sub2api:custom`
+- 写入 `SUB2API_CUSTOM_IMAGE` / `SUB2API_UPDATE_METHOD=docker`（后台 custom 在线更新通道）
 - 自动生成安全凭证（JWT_SECRET、TOTP_ENCRYPTION_KEY、POSTGRES_PASSWORD）
-- 创建 `.env` 文件并填充自动生成的密钥
-- 创建数据目录（使用本地目录，便于备份和迁移）
+- 创建 `.env` 与数据目录（本地目录，便于备份和迁移）
 - 显示生成的凭证供你记录
+
+覆盖默认镜像（可选）：
+
+```bash
+export SUB2API_IMAGE=ghcr.io/micah123321/sub2api:custom-abc1234
+curl -sSL https://raw.githubusercontent.com/Micah123321/sub2api/custom/deploy/docker-deploy.sh | bash
+```
 
 #### 手动部署
 
 如果你希望手动配置：
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/Wei-Shaw/sub2api.git
+# 1. 克隆本 fork（custom 分支）
+git clone -b custom https://github.com/Micah123321/sub2api.git
 cd sub2api/deploy
 
 # 2. 复制环境配置文件
 cp .env.example .env
 chmod 600 .env
 
-# 3. 编辑配置（生成安全密码）
+# 3. 编辑配置（生成安全密码 + 确认镜像）
 nano .env
 ```
 
-**`.env` 必须配置项：**
+**`.env` 必须 / 推荐配置项：**
 
 ```bash
+# 运行镜像（含 tag）— custom 通道
+SUB2API_IMAGE=ghcr.io/micah123321/sub2api:custom
+
+# custom 在线更新检测用仓库（不含 tag）
+SUB2API_CUSTOM_IMAGE=ghcr.io/micah123321/sub2api
+SUB2API_UPDATE_METHOD=docker
+# 私有 GHCR 时填写 read:packages token
+# SUB2API_GHCR_TOKEN=
+
 # PostgreSQL 密码（必需）
 POSTGRES_PASSWORD=your_secure_password_here
 
@@ -365,15 +395,9 @@ SERVER_PORT=8080
 ```
 
 **生成安全密钥：**
+
 ```bash
-# 生成 JWT_SECRET
-openssl rand -hex 32
-
-# 生成 TOTP_ENCRYPTION_KEY
-openssl rand -hex 32
-
-# 生成 POSTGRES_PASSWORD
-openssl rand -hex 32
+openssl rand -hex 32   # JWT_SECRET / TOTP_ENCRYPTION_KEY / POSTGRES_PASSWORD
 ```
 
 ```bash
@@ -401,7 +425,7 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 | **docker-compose.local.yml** | 本地目录 | ✅ 简单（打包整个目录） | 生产环境、频繁备份 |
 | **docker-compose.yml** | 命名卷 | ⚠️ 需要 docker 命令 | 简单设置 |
 
-**推荐：** 使用 `docker-compose.local.yml`（脚本部署）以便更轻松地管理数据。
+**推荐：** 使用 `docker-compose.local.yml`（脚本部署）以便更轻松地管理数据。脚本会将其保存为 `docker-compose.yml`。
 
 #### 启用“数据管理”功能（datamanagementd）
 
@@ -420,25 +444,32 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 在浏览器中打开 `http://你的服务器IP:8080`
 
 如果管理员密码是自动生成的，在日志中查找：
-```bash
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
-```
-
-#### 升级
 
 ```bash
-# 拉取最新镜像并重建容器
-docker compose -f docker-compose.local.yml pull
-docker compose -f docker-compose.local.yml up -d
+docker compose logs sub2api | grep "admin password"
 ```
+
+#### 升级（custom 镜像）
+
+```bash
+# 拉取 GHCR 上最新 custom 标签并重建
+docker compose pull
+docker compose up -d
+
+# 或钉死某次构建
+# 编辑 .env: SUB2API_IMAGE=ghcr.io/micah123321/sub2api:custom-<sha>
+docker compose up -d
+```
+
+管理后台也可切换 **custom** 更新通道检测 GHCR 标签；Docker 场景会写入 `data/pending_image_tag`，再由 `pull` / 重建容器落地。
 
 #### 轻松迁移（本地目录版）
 
-使用 `docker-compose.local.yml` 时，可以轻松迁移到新服务器：
+使用本地目录挂载时，可以轻松迁移到新服务器：
 
 ```bash
 # 源服务器
-docker compose -f docker-compose.local.yml down
+docker compose down
 cd ..
 tar czf sub2api-complete.tar.gz sub2api-deploy/
 
@@ -448,23 +479,23 @@ scp sub2api-complete.tar.gz user@new-server:/path/
 # 新服务器
 tar xzf sub2api-complete.tar.gz
 cd sub2api-deploy/
-docker compose -f docker-compose.local.yml up -d
+docker compose up -d
 ```
 
 #### 常用命令
 
 ```bash
 # 停止所有服务
-docker compose -f docker-compose.local.yml down
+docker compose down
 
 # 重启
-docker compose -f docker-compose.local.yml restart
+docker compose restart
 
 # 查看所有日志
-docker compose -f docker-compose.local.yml logs -f
+docker compose logs -f
 
 # 删除所有数据（谨慎！）
-docker compose -f docker-compose.local.yml down
+docker compose down
 rm -rf data/ postgres_data/ redis_data/
 ```
 

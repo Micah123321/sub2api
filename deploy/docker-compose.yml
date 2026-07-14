@@ -16,7 +16,8 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    # custom 通道默认镜像（GHCR）；可用 .env 中 SUB2API_IMAGE 覆盖
+    image: ${SUB2API_IMAGE:-ghcr.io/micah123321/sub2api:custom}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -149,6 +150,12 @@ services:
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      # custom 通道：GHCR 镜像仓库（不含 tag）；默认与本 fork 的 custom 构建一致
+      - SUB2API_CUSTOM_IMAGE=${SUB2API_CUSTOM_IMAGE:-ghcr.io/micah123321/sub2api}
+      # 私有 GHCR 包时填写 read:packages token（不要用宽权限 GITHUB_TOKEN）
+      - SUB2API_GHCR_TOKEN=${SUB2API_GHCR_TOKEN:-}
+      # Docker 部署声明更新方式，便于 custom 通道写入 pending_image_tag
+      - SUB2API_UPDATE_METHOD=${SUB2API_UPDATE_METHOD:-docker}
 
       # =======================================================================
       # Image Generation Stream & Concurrency

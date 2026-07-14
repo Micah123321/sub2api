@@ -47,39 +47,51 @@ See [APPLE_CONTAINER.md](./APPLE_CONTAINER.md) for configuration, upgrades, pers
 
 ---
 
-## Docker Deployment (Recommended)
+## Docker Deployment (Recommended · custom / GHCR)
+
+Default runtime image for this fork:
+
+```text
+ghcr.io/micah123321/sub2api:custom
+```
+
+Override with `SUB2API_IMAGE` (include tag). In-app custom update channel uses `SUB2API_CUSTOM_IMAGE` (repo without tag) and optional `SUB2API_GHCR_TOKEN`.
 
 ### Method 1: One-Click Deployment (Recommended)
 
-Use the automated preparation script for the easiest setup:
+Use the automated preparation script (reads deploy assets from the **custom** branch):
 
 ```bash
 # Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/Micah123321/sub2api/custom/deploy/docker-deploy.sh | bash
 
 # Or download first, then run
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
+curl -sSL https://raw.githubusercontent.com/Micah123321/sub2api/custom/deploy/docker-deploy.sh -o docker-deploy.sh
 chmod +x docker-deploy.sh
 ./docker-deploy.sh
 ```
 
 **What the script does:**
-- Downloads `docker-compose.local.yml` and `.env.example`
+- Downloads `docker-compose.local.yml` and `.env.example` from `Micah123321/sub2api@custom`
+- Pins `SUB2API_IMAGE=ghcr.io/micah123321/sub2api:custom` (override with env `SUB2API_IMAGE`)
+- Sets `SUB2API_CUSTOM_IMAGE` + `SUB2API_UPDATE_METHOD=docker` for the dual-channel updater
 - Automatically generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-- Creates `.env` file with generated secrets
-- Creates necessary data directories (data/, postgres_data/, redis_data/)
+- Creates `.env` and data directories (data/, postgres_data/, redis_data/)
 - **Displays generated credentials** (POSTGRES_PASSWORD, JWT_SECRET, etc.)
 
 **After running the script:**
 ```bash
-# Start services
-docker compose -f docker-compose.local.yml up -d
+# Private GHCR package only:
+# echo "$SUB2API_GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin
+
+# Start services (script wrote docker-compose.yml)
+docker compose up -d
 
 # View logs
-docker compose -f docker-compose.local.yml logs -f sub2api
+docker compose logs -f sub2api
 
 # If admin password was auto-generated, find it in logs:
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+docker compose logs sub2api | grep "admin password"
 
 # Access Web UI
 # http://localhost:8080
@@ -90,14 +102,14 @@ docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 If you prefer manual control:
 
 ```bash
-# Clone repository
-git clone https://github.com/Wei-Shaw/sub2api.git
+# Clone this fork (custom branch)
+git clone -b custom https://github.com/Micah123321/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
 cp .env.example .env
 chmod 600 .env
-nano .env  # Set POSTGRES_PASSWORD and other required variables
+nano .env  # Set POSTGRES_PASSWORD, SUB2API_IMAGE, and other required variables
 
 # Generate secure secrets (recommended)
 JWT_SECRET=$(openssl rand -hex 32)

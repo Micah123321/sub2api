@@ -12,7 +12,8 @@
 
 services:
   sub2api:
-    image: weishaw/sub2api:latest
+    # custom 通道默认镜像（GHCR）；可用 .env 中 SUB2API_IMAGE 覆盖
+    image: ${SUB2API_IMAGE:-ghcr.io/micah123321/sub2api:custom}
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -100,6 +101,14 @@ services:
       - GEMINI_CLI_OAUTH_CLIENT_SECRET=${GEMINI_CLI_OAUTH_CLIENT_SECRET:-}
       - ANTIGRAVITY_OAUTH_CLIENT_SECRET=${ANTIGRAVITY_OAUTH_CLIENT_SECRET:-}
       - ANTIGRAVITY_USER_AGENT_VERSION=${ANTIGRAVITY_USER_AGENT_VERSION:-}
+
+      # =======================================================================
+      # Update Configuration (在线更新配置)
+      # =======================================================================
+      - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      - SUB2API_CUSTOM_IMAGE=${SUB2API_CUSTOM_IMAGE:-ghcr.io/micah123321/sub2api}
+      - SUB2API_GHCR_TOKEN=${SUB2API_GHCR_TOKEN:-}
+      - SUB2API_UPDATE_METHOD=${SUB2API_UPDATE_METHOD:-docker}
 
       # =======================================================================
       # Image Generation Stream & Concurrency
