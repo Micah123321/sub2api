@@ -272,7 +272,8 @@ func TestUpdateServiceCheckUpdateCustomChannel(t *testing.T) {
 		tags: []GHCRImageTag{
 			{Tag: "latest"},
 			{Tag: "custom-aaa1111", UpdatedAt: "2026-07-01T00:00:00Z"},
-			{Tag: "custom", Digest: "sha256:abc", UpdatedAt: "2026-07-02T00:00:00Z"},
+			// Floating retag is newer than some sha tags but must not win over newest immutable tag.
+			{Tag: "custom", Digest: "sha256:abc", UpdatedAt: "2026-07-04T00:00:00Z"},
 			{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"},
 		},
 	}
@@ -293,10 +294,12 @@ func TestUpdateServiceCheckUpdateCustomChannel(t *testing.T) {
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, UpdateChannelCustom, info.Channel)
-	require.Equal(t, "custom", info.LatestTag)
+	// Prefer newest immutable custom-<sha> by package time, not floating "custom".
+	require.Equal(t, "custom-bbb2222", info.LatestTag)
+	require.Equal(t, "custom-bbb2222", info.LatestVersion)
 	require.Equal(t, UpdateMethodManual, info.UpdateMethod)
 	require.True(t, info.HasUpdate)
-	require.Contains(t, info.ManualCommand, "docker pull ghcr.io/micah123321/sub2api:custom")
+	require.Contains(t, info.ManualCommand, "docker pull ghcr.io/micah123321/sub2api:custom-bbb2222")
 }
 
 func TestUpdateServicePerformUpdateCustomNonDockerErrors(t *testing.T) {
