@@ -49,8 +49,10 @@ func Encode(events []Event) (EncodedLog, error) {
 	if err != nil {
 		return EncodedLog{}, fmt.Errorf("create zstd encoder: %w", err)
 	}
-	defer zstdEncoder.Close()
 	payload := zstdEncoder.EncodeAll(raw.Bytes(), nil)
+	if err := zstdEncoder.Close(); err != nil {
+		return EncodedLog{}, fmt.Errorf("close zstd encoder: %w", err)
+	}
 	digest := sha256.Sum256(payload)
 	return EncodedLog{
 		CodecVersion: CodecVersion, SchemaVersion: SchemaVersion,
