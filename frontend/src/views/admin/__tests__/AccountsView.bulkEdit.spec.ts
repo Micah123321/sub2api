@@ -96,7 +96,19 @@ const PaginationStub = {
 
 const BulkEditAccountModalStub = {
   props: ['show', 'target'],
-  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
+  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'" :data-plan-type="target?.filters?.plan_type ?? \'\'"></div>'
+}
+
+const AccountTableFiltersStub = {
+  props: ['filters'],
+  emits: ['update:filters', 'change'],
+  methods: {
+    applyPlanFilter() {
+      this.$emit('update:filters', { ...this.filters, platform: 'openai', plan_type: 'plus' })
+      this.$emit('change')
+    }
+  },
+  template: '<button data-test="apply-plan-filter" @click="applyPlanFilter">filter</button>'
 }
 
 describe('admin AccountsView bulk edit scope', () => {
@@ -140,7 +152,7 @@ describe('admin AccountsView bulk edit scope', () => {
           Pagination: true,
           ConfirmDialog: true,
           AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
-          AccountTableFilters: { template: '<div></div>' },
+          AccountTableFilters: AccountTableFiltersStub,
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
           ImportDataModal: true,
@@ -167,11 +179,19 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
+    await wrapper.get('[data-test="apply-plan-filter"]').trigger('click')
+    await flushPromises()
     await wrapper.get('[data-test="edit-filtered"]').trigger('click')
     await flushPromises()
 
+    expect(listAccounts).toHaveBeenLastCalledWith(
+      1,
+      100,
+      expect.objectContaining({ platform: 'openai', plan_type: 'plus' })
+    )
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-plan-type')).toBe('plus')
   })
 
   it('renders the created_at column by default', async () => {

@@ -52,6 +52,51 @@ func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
 	require.Equal(t, 0, offset)
 }
 
+func TestAccountHandlerListNormalizesPlanTypeFilter(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?plan_type=%20PLUS%20", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "plus", adminSvc.lastListAccounts.planType)
+}
+
+func TestAccountHandlerListRejectsInvalidPlanTypeFilter(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?plan_type=enterprise", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "INVALID_PLAN_TYPE_FILTER")
+	require.Zero(t, adminSvc.lastListAccounts.calls)
+}
+
+func TestAccountHandlerSchedulerPoolUsesPlanTypeFilter(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	adminSvc.accounts = []service.Account{{
+		ID:          401,
+		Name:        "openai-pro",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 3,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?platform=openai&plan_type=PRO&include_scheduler_score=1", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "pro", adminSvc.lastSchedulerScoreFilterPlanType)
+}
+
 func TestAccountHandlerListReturnsSchedulerScoresPerGroup(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 	now := time.Now().UTC()

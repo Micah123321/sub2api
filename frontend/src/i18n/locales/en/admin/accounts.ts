@@ -84,6 +84,8 @@ export default {
       notesHint: 'Notes are optional',
       allPlatforms: 'All Platforms',
       allTypes: 'All Types',
+      planTypeFilterLabel: 'Plan type',
+      allPlanTypes: 'All Plans',
       allStatus: 'All Status',
       allGroups: 'All Groups',
       ungroupedGroup: 'Ungrouped',

@@ -314,6 +314,63 @@ func (s *AccountRepoSuite) TestList() {
 	s.Require().Equal(int64(2), page.Total)
 }
 
+func (s *AccountRepoSuite) TestListWithFilters_PlanType() {
+	plans := []string{"k12", "team", "plus", "pro", "free"}
+	for _, plan := range plans {
+		mustCreateAccount(s.T(), s.client, &service.Account{
+			Name:        "openai-" + plan,
+			Platform:    service.PlatformOpenAI,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"plan_type": plan},
+		})
+	}
+	parent := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-plus-parent",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": " Plus "},
+	})
+	parentID := parent.ID
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:            "openai-plus-shadow",
+		Platform:        service.PlatformOpenAI,
+		Type:            service.AccountTypeOAuth,
+		ParentAccountID: &parentID,
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-plus",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "plus"},
+	})
+
+	for _, plan := range plans {
+		accounts, page, err := s.repo.ListWithFilters(
+			s.ctx,
+			pagination.PaginationParams{Page: 1, PageSize: 20},
+			"", "", "", "", 0, "", plan,
+		)
+		s.Require().NoError(err)
+		s.Require().NotNil(page)
+
+		names := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			names = append(names, account.Name)
+			s.Require().Equal(service.PlatformOpenAI, account.Platform)
+		}
+		if plan == "plus" {
+			s.Require().ElementsMatch(
+				[]string{"openai-plus", "openai-plus-parent", "openai-plus-shadow"},
+				names,
+			)
+			s.Require().Equal(int64(3), page.Total)
+			continue
+		}
+		s.Require().Equal([]string{"openai-" + plan}, names)
+		s.Require().Equal(int64(1), page.Total)
+	}
+}
+
 func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_GrokCursorAndExclusions() {
 	now := time.Now().UTC()
 	valid1 := mustCreateAccount(s.T(), s.client, &service.Account{
@@ -605,7 +662,7 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 
 			tt.setup(client)
 
-			accounts, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, tt.platform, tt.accType, tt.status, tt.search, tt.groupID, tt.privacyMode)
+			accounts, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, tt.platform, tt.accType, tt.status, tt.search, tt.groupID, tt.privacyMode, "")
 			s.Require().NoError(err)
 			s.Require().Len(accounts, tt.wantCount)
 			// Regression guard for issue #3601: when the whole result set fits on a single page,
@@ -677,7 +734,7 @@ func (s *AccountRepoSuite) TestPreload_And_VirtualFields() {
 	s.Require().Len(got.Groups, 1, "expected Groups to be populated")
 	s.Require().Equal(group.ID, got.Groups[0].ID)
 
-	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "acc", 0, "")
+	accounts, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "acc", 0, "", "")
 	s.Require().NoError(err, "ListWithFilters")
 	s.Require().Equal(int64(1), page.Total)
 	s.Require().Len(accounts, 1)

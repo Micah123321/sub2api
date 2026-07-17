@@ -208,6 +208,7 @@ func TestBulkUpdateAcceptsFilterTargetRequest(t *testing.T) {
 			"status":       "active",
 			"group":        "12",
 			"privacy_mode": "blocked",
+			"plan_type":    " PRO ",
 			"search":       "bulk-target",
 		},
 		"schedulable": true,
@@ -221,4 +222,24 @@ func TestBulkUpdateAcceptsFilterTargetRequest(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, float64(0), resp["code"])
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput)
+	require.Equal(t, "pro", adminSvc.lastBulkUpdateAccountInput.Filters.PlanType)
+}
+
+func TestBulkUpdateRejectsInvalidPlanTypeFilter(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := setupAccountMixedChannelRouter(adminSvc)
+	body, _ := json.Marshal(map[string]any{
+		"filters":     map[string]any{"plan_type": "enterprise"},
+		"schedulable": true,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "INVALID_PLAN_TYPE_FILTER")
+	require.Nil(t, adminSvc.lastBulkUpdateAccountInput)
 }
