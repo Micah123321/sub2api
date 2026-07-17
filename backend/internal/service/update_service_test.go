@@ -296,60 +296,68 @@ func TestUpdateServiceCheckUpdateCustomChannel(t *testing.T) {
 	require.Equal(t, UpdateChannelCustom, info.Channel)
 	// Prefer newest immutable custom-<sha> by package time, not floating "custom".
 	require.Equal(t, "custom-bbb2222", info.LatestTag)
-	require.Equal(t, "custom-bbb2222", info.LatestVersion)
+	require.Equal(t, "0.1.147-custom.bbb2222", info.LatestVersion)
 	require.Equal(t, UpdateMethodManual, info.UpdateMethod)
+	// Official (non-custom) current version should report custom channel updates as available.
 	require.True(t, info.HasUpdate)
 	require.Contains(t, info.ManualCommand, "docker pull ghcr.io/micah123321/sub2api:custom-bbb2222")
 }
 
-func TestUpdateServicePerformUpdateCustomNonDockerErrors(t *testing.T) {
+func TestUpdateServiceCheckUpdateCustomChannelHasUpdateWhenPublishedOlder(t *testing.T) {
 	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
 	ghcr := &updateServiceGHCRClientStub{
-		tags: []GHCRImageTag{{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"}},
+		tags: []GHCRImageTag{
+			{Tag: "custom-aaa1111", UpdatedAt: "2026-07-01T00:00:00Z"},
+			{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"},
+		},
 	}
+	// Current is an older published custom build; latest is bbb2222.
 	svc := NewUpdateServiceWithOptions(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{},
-		"0.1.147",
+		"0.1.147-custom.aaa1111",
 		"release",
 		UpdateServiceOptions{
-			SettingRepo: settings,
-			GHCRClient:  ghcr,
-			CustomImage: "ghcr.io/micah123321/sub2api",
+			SettingRepo:   settings,
+			GHCRClient:    ghcr,
+			CustomImage:   "ghcr.io/micah123321/sub2api",
+			CurrentCommit: "aaa1111",
 		},
 	)
-	svc.isDockerEnvFn = func() bool { return false }
 
-	err := svc.PerformUpdate(context.Background())
-	require.ErrorIs(t, err, ErrCustomUpdateNotDocker)
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, "custom-bbb2222", info.LatestTag)
+	require.Equal(t, "0.1.147-custom.bbb2222", info.LatestVersion)
 }
 
-func TestUpdateServicePerformUpdateCustomDockerWritesPending(t *testing.T) {
-	dir := t.TempDir()
+func TestUpdateServiceCheckUpdateCustomChannelUpToDate(t *testing.T) {
 	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
 	ghcr := &updateServiceGHCRClientStub{
-		tags: []GHCRImageTag{{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"}},
+		tags: []GHCRImageTag{
+			{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"},
+			{Tag: "custom-aaa1111", UpdatedAt: "2026-07-01T00:00:00Z"},
+		},
 	}
 	svc := NewUpdateServiceWithOptions(
 		&updateServiceCacheStub{},
 		&updateServiceGitHubClientStub{},
-		"0.1.147",
+		"0.1.160-custom.bbb2222",
 		"release",
 		UpdateServiceOptions{
-			SettingRepo: settings,
-			GHCRClient:  ghcr,
-			CustomImage: "ghcr.io/micah123321/sub2api",
-			DataDir:     dir,
+			SettingRepo:   settings,
+			GHCRClient:    ghcr,
+			CustomImage:   "ghcr.io/micah123321/sub2api",
+			CurrentCommit: "bbb2222",
 		},
 	)
-	svc.isDockerEnvFn = func() bool { return true }
 
-	err := svc.PerformUpdate(context.Background())
+	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
-
-	data, readErr := os.ReadFile(filepath.Join(dir, pendingImageFileName))
-	require.NoError(t, readErr)
-	require.Equal(t, "ghcr.io/micah123321/sub2api:custom-bbb2222\n", string(data))
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.160-custom.bbb2222", info.LatestVersion)
+	require.Equal(t, "custom-bbb2222", info.LatestTag)
 }
 
 func TestUpdateServiceListCustomRollbackVersions(t *testing.T) {
@@ -379,9 +387,69 @@ func TestUpdateServiceListCustomRollbackVersions(t *testing.T) {
 	versions, err := svc.ListRollbackVersions(context.Background())
 	require.NoError(t, err)
 	require.Len(t, versions, 3)
-	require.Equal(t, "custom-aaa", versions[0].Version)
-	require.Equal(t, "custom-bbb", versions[1].Version)
-	require.Equal(t, "custom-ccc", versions[2].Version)
+	require.Equal(t, "0.1.147-custom.aaa", versions[0].Version)
+	require.Equal(t, "custom-aaa", versions[0].Tag)
+	require.Equal(t, "0.1.147-custom.bbb", versions[1].Version)
+	require.Equal(t, "0.1.147-custom.ccc", versions[2].Version)
+}
+
+func TestUpdateServicePerformUpdateCustomNonDockerErrors(t *testing.T) {
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	ghcr := &updateServiceGHCRClientStub{
+		// include current so HasUpdate is true (published older than latest)
+		tags: []GHCRImageTag{
+			{Tag: "custom-aaa1111", UpdatedAt: "2026-07-01T00:00:00Z"},
+			{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"},
+		},
+	}
+	svc := NewUpdateServiceWithOptions(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.147-custom.aaa1111",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo:   settings,
+			GHCRClient:    ghcr,
+			CustomImage:   "ghcr.io/micah123321/sub2api",
+			CurrentCommit: "aaa1111",
+		},
+	)
+	svc.isDockerEnvFn = func() bool { return false }
+
+	err := svc.PerformUpdate(context.Background())
+	require.ErrorIs(t, err, ErrCustomUpdateNotDocker)
+}
+
+func TestUpdateServicePerformUpdateCustomDockerWritesPending(t *testing.T) {
+	dir := t.TempDir()
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	ghcr := &updateServiceGHCRClientStub{
+		tags: []GHCRImageTag{
+			{Tag: "custom-aaa1111", UpdatedAt: "2026-07-01T00:00:00Z"},
+			{Tag: "custom-bbb2222", UpdatedAt: "2026-07-03T00:00:00Z"},
+		},
+	}
+	svc := NewUpdateServiceWithOptions(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.147-custom.aaa1111",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo:   settings,
+			GHCRClient:    ghcr,
+			CustomImage:   "ghcr.io/micah123321/sub2api",
+			CurrentCommit: "aaa1111",
+			DataDir:       dir,
+		},
+	)
+	svc.isDockerEnvFn = func() bool { return true }
+
+	err := svc.PerformUpdate(context.Background())
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(filepath.Join(dir, pendingImageFileName))
+	require.NoError(t, readErr)
+	require.Equal(t, "ghcr.io/micah123321/sub2api:custom-bbb2222\n", string(data))
 }
 
 func TestUpdateServiceRollbackToVersionCustomNonDocker(t *testing.T) {
@@ -407,6 +475,13 @@ func TestUpdateServiceRollbackToVersionCustomNonDocker(t *testing.T) {
 
 	err := svc.RollbackToVersion(context.Background(), "custom-aaa")
 	require.ErrorIs(t, err, ErrCustomUpdateNotDocker)
+}
+
+func TestFormatCustomDisplayVersion(t *testing.T) {
+	svc := &UpdateService{currentVersion: "0.1.160-custom.863a9800"}
+	require.Equal(t, "0.1.160-custom.fca83040", svc.formatCustomDisplayVersion("custom-fca83040"))
+	require.Equal(t, "0.1.160-custom", svc.formatCustomDisplayVersion("custom"))
+	require.Equal(t, "0.1.160-custom.abc", svc.formatCustomDisplayVersion("0.1.160-custom.abc"))
 }
 
 func TestCompareVersionsHandlesCustomSuffix(t *testing.T) {

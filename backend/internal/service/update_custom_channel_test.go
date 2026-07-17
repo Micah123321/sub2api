@@ -48,17 +48,33 @@ func TestSortCustomTagsNewestFirst_ParseRFC3339(t *testing.T) {
 
 func TestCustomHasUpdate_ImmutableSha(t *testing.T) {
 	s := &UpdateService{currentVersion: "0.1.155-custom.aaaaaaa", currentCommit: "aaaaaaa"}
-	if s.customHasUpdate(GHCRImageTag{Tag: "custom-aaaaaaa"}) {
+	all := []GHCRImageTag{
+		{Tag: "custom-aaaaaaa"},
+		{Tag: "custom-bbbbbbb"},
+	}
+	if s.customHasUpdate(GHCRImageTag{Tag: "custom-aaaaaaa"}, all) {
 		t.Fatal("same sha should not need update")
 	}
-	if !s.customHasUpdate(GHCRImageTag{Tag: "custom-bbbbbbb"}) {
-		t.Fatal("different sha should need update")
+	if !s.customHasUpdate(GHCRImageTag{Tag: "custom-bbbbbbb"}, all) {
+		t.Fatal("different published sha should need update")
 	}
 }
 
 func TestCustomHasUpdate_FloatingWhenAlreadyCustom(t *testing.T) {
 	s := &UpdateService{currentVersion: "0.1.155-custom.aaaaaaa", currentCommit: "aaaaaaa"}
-	if s.customHasUpdate(GHCRImageTag{Tag: "custom"}) {
+	if s.customHasUpdate(GHCRImageTag{Tag: "custom"}, nil) {
 		t.Fatal("floating custom alone should not force update when already on custom build")
+	}
+}
+
+func TestCustomHasUpdate_LocalAheadNotInRegistry(t *testing.T) {
+	s := &UpdateService{currentVersion: "0.1.160-custom.863a9800", currentCommit: "863a9800"}
+	all := []GHCRImageTag{
+		{Tag: "custom-fca83040"},
+		{Tag: "custom-aaaaaaa"},
+	}
+	// Local/unpublished commit should not force "update available" to an older registry tip.
+	if s.customHasUpdate(GHCRImageTag{Tag: "custom-fca83040"}, all) {
+		t.Fatal("local sha not in registry should not report update")
 	}
 }

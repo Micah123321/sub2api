@@ -712,14 +712,15 @@ func (s *UpdateService) fetchLatestCustom(ctx context.Context) (*UpdateInfo, err
 		manualCmd = fmt.Sprintf("docker pull %s:%s", s.customImage, latest.Tag)
 	}
 
-	hasUpdate := s.customHasUpdate(latest)
+	hasUpdate := s.customHasUpdate(latest, filtered)
+	displayVersion := s.formatCustomDisplayVersion(latest.Tag)
 
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
-		LatestVersion:  latest.Tag,
+		LatestVersion:  displayVersion,
 		HasUpdate:      hasUpdate,
 		ReleaseInfo: &ReleaseInfo{
-			Name:        latest.Tag,
+			Name:        displayVersion,
 			Body:        "Custom channel image update",
 			PublishedAt: latest.UpdatedAt,
 			HTMLURL:     latest.HTMLURL,
@@ -763,7 +764,7 @@ func (s *UpdateService) listCustomRollbackVersions(ctx context.Context) ([]Rollb
 			continue
 		}
 		out = append(out, RollbackVersion{
-			Version:     t.Tag,
+			Version:     s.formatCustomDisplayVersion(t.Tag),
 			PublishedAt: t.UpdatedAt,
 			HTMLURL:     t.HTMLURL,
 			Tag:         t.Tag,
@@ -777,40 +778,137 @@ func (s *UpdateService) listCustomRollbackVersions(ctx context.Context) ([]Rollb
 	return out, nil
 }
 
-func (s *UpdateService) customHasUpdate(latest GHCRImageTag) bool {
+// customHasUpdate decides whether GHCR has a usable newer custom image.
+// allTags should be filterCustomTags() output when available so local-only
+// builds (current sha not published) are not reported as "update available".
+func (s *UpdateService) customHasUpdate(latest GHCRImageTag, allTags []GHCRImageTag) bool {
 	if latest.Tag == "" {
 		return false
 	}
+	// Already on the reported latest.
+	if s.isCurrentCustomTag(latest) {
+		return false
+	}
+
 	// Floating tag alone cannot express a newer build; treat as "unknown newer"
 	// only when the running binary is not already a custom image build.
 	if latest.Tag == "custom" {
-		if s.isCurrentCustomTag(latest) {
-			return false
-		}
-		if s.currentCommit != "" && strings.Contains(s.currentVersion, shortCommit(s.currentCommit)) {
+		if s.currentCustomSHA() != "" {
 			return false
 		}
 		if strings.Contains(s.currentVersion, "-custom.") || strings.Contains(s.currentVersion, "custom-") {
-			// Already on some custom build; without a newer immutable tag do not force update.
 			return false
 		}
 		return true
 	}
-	// Immutable custom-<sha>: update when the running image/commit is not that sha.
+
+	// Immutable custom-<sha>.
 	if strings.HasPrefix(latest.Tag, "custom-") {
-		sha := strings.TrimPrefix(latest.Tag, "custom-")
-		if sha == "" {
+		latestSHA := strings.TrimPrefix(latest.Tag, "custom-")
+		if latestSHA == "" {
 			return false
 		}
-		if s.currentCommit != "" && (strings.HasPrefix(s.currentCommit, sha) || strings.HasPrefix(sha, shortCommit(s.currentCommit))) {
+		currentSHA := s.currentCustomSHA()
+		if currentSHA != "" && customSHAMatch(currentSHA, latestSHA) {
 			return false
 		}
-		if strings.Contains(s.currentVersion, sha) {
+		// Current is a custom build whose sha is not among published immutable tags:
+		// treat as local/newer-than-registry (or private) and do not force update.
+		if currentSHA != "" && len(allTags) > 0 && !customSHAInTags(currentSHA, allTags) {
 			return false
 		}
+		// Current not a custom build, or current sha is known on registry but not latest.
 		return true
 	}
 	return compareVersions(s.currentVersion, latest.Tag) < 0
+}
+
+// formatCustomDisplayVersion maps registry tags to UI-friendly versions aligned
+// with build-time VERSION (e.g. custom-fca83040 -> 0.1.160-custom.fca83040).
+func (s *UpdateService) formatCustomDisplayVersion(tag string) string {
+	tag = strings.TrimSpace(strings.TrimPrefix(tag, "v"))
+	if tag == "" {
+		return s.currentVersion
+	}
+	// Already display-shaped.
+	if strings.Contains(tag, "-custom.") {
+		return tag
+	}
+	core := coreSemver(s.currentVersion)
+	if core == "" {
+		// Fall back to VERSION-like current when it has no core (rare).
+		core = strings.TrimSpace(strings.TrimPrefix(s.currentVersion, "v"))
+		if i := strings.IndexAny(core, "-+"); i >= 0 {
+			core = core[:i]
+		}
+		if core == "" || !strings.Contains(core, ".") {
+			core = "0.0.0"
+		}
+	}
+	if tag == "custom" {
+		return core + "-custom"
+	}
+	if strings.HasPrefix(tag, "custom-") {
+		sha := strings.TrimPrefix(tag, "custom-")
+		if sha == "" {
+			return core + "-custom"
+		}
+		return core + "-custom." + sha
+	}
+	return tag
+}
+
+func (s *UpdateService) currentCustomSHA() string {
+	v := strings.TrimSpace(strings.TrimPrefix(s.currentVersion, "v"))
+	// Prefer sha embedded in custom display/build versions.
+	if i := strings.Index(v, "-custom."); i >= 0 {
+		rest := v[i+len("-custom."):]
+		if j := strings.IndexAny(rest, "-+"); j >= 0 {
+			rest = rest[:j]
+		}
+		if sha := shortCommit(rest); sha != "" {
+			return sha
+		}
+	}
+	if strings.HasPrefix(v, "custom-") {
+		if sha := shortCommit(strings.TrimPrefix(v, "custom-")); sha != "" {
+			return sha
+		}
+	}
+	// Use injected commit only for custom-flavored builds. Official release builds
+	// also carry a commit SHA, but that must not suppress custom-channel updates.
+	if strings.Contains(v, "-custom") || strings.Contains(v, "custom-") {
+		if sha := shortCommit(s.currentCommit); sha != "" {
+			return sha
+		}
+	}
+	return ""
+}
+
+func customSHAMatch(a, b string) bool {
+	a = shortCommit(a)
+	b = shortCommit(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a) || a == b
+}
+
+func customSHAInTags(sha string, tags []GHCRImageTag) bool {
+	sha = shortCommit(sha)
+	if sha == "" {
+		return false
+	}
+	for _, t := range tags {
+		tag := strings.TrimSpace(t.Tag)
+		if !strings.HasPrefix(tag, "custom-") {
+			continue
+		}
+		if customSHAMatch(sha, strings.TrimPrefix(tag, "custom-")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *UpdateService) isCurrentCustomTag(t GHCRImageTag) bool {
@@ -819,12 +917,16 @@ func (s *UpdateService) isCurrentCustomTag(t GHCRImageTag) bool {
 	}
 	if strings.HasPrefix(t.Tag, "custom-") {
 		sha := strings.TrimPrefix(t.Tag, "custom-")
-		if s.currentCommit != "" && (strings.HasPrefix(s.currentCommit, sha) || strings.HasPrefix(sha, shortCommit(s.currentCommit))) {
+		if current := s.currentCustomSHA(); current != "" && customSHAMatch(current, sha) {
 			return true
 		}
 		if strings.Contains(s.currentVersion, sha) {
 			return true
 		}
+	}
+	display := s.formatCustomDisplayVersion(t.Tag)
+	if display != "" && (display == strings.TrimPrefix(s.currentVersion, "v") || display == s.currentVersion) {
+		return true
 	}
 	return t.Tag == s.currentVersion || strings.TrimPrefix(t.Tag, "v") == strings.TrimPrefix(s.currentVersion, "v")
 }
@@ -1031,16 +1133,37 @@ func (s *UpdateService) getFromCache(ctx context.Context, channel string) (*Upda
 		method = s.detectUpdateMethod(ch)
 	}
 
+	latestTag := strings.TrimSpace(cached.LatestTag)
+	// Cached Latest may already be a display version (x.y.z-custom.sha); prefer LatestTag for registry ops.
+	if latestTag == "" {
+		if strings.Contains(cached.Latest, "-custom.") {
+			parts := strings.SplitN(cached.Latest, "-custom.", 2)
+			if len(parts) == 2 && parts[1] != "" {
+				latestTag = "custom-" + shortCommit(parts[1])
+			}
+		} else if cached.Latest == "custom" || strings.HasPrefix(cached.Latest, "custom-") {
+			latestTag = cached.Latest
+		}
+	}
+
 	hasUpdate := false
 	if ch == UpdateChannelCustom {
-		hasUpdate = s.customHasUpdate(GHCRImageTag{Tag: coalesceString(cached.LatestTag, cached.Latest), Digest: cached.Digest})
+		// Cache path has no full tag list; recompute with latest only.
+		// Local-ahead false positives require a forced refresh to clear.
+		hasUpdate = s.customHasUpdate(GHCRImageTag{Tag: coalesceString(latestTag, cached.Latest), Digest: cached.Digest}, nil)
 	} else {
 		hasUpdate = compareVersions(s.currentVersion, cached.Latest) < 0
 	}
 
+	latestDisplay := cached.Latest
+	if ch == UpdateChannelCustom {
+		// Normalize display even for older cache entries that stored raw tags.
+		latestDisplay = s.formatCustomDisplayVersion(coalesceString(latestTag, cached.Latest))
+	}
+
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
-		LatestVersion:  cached.Latest,
+		LatestVersion:  latestDisplay,
 		HasUpdate:      hasUpdate,
 		ReleaseInfo:    cached.ReleaseInfo,
 		Cached:         true,
@@ -1048,7 +1171,7 @@ func (s *UpdateService) getFromCache(ctx context.Context, channel string) (*Upda
 		Channel:        ch,
 		UpdateMethod:   method,
 		Image:          cached.Image,
-		LatestTag:      coalesceString(cached.LatestTag, cached.Latest),
+		LatestTag:      coalesceString(latestTag, cached.LatestTag),
 		Digest:         cached.Digest,
 		ManualCommand:  cached.ManualCommand,
 	}, nil
