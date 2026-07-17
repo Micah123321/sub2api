@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/conversationlog"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -51,12 +52,18 @@ type GatewayHandler struct {
 	errorPassthroughService   *service.ErrorPassthroughService
 	contentModerationService  *service.ContentModerationService
 	securityAuditCoordinator  *securityaudit.Coordinator
+	conversationLogService    *service.ConversationLogService
 	concurrencyHelper         *ConcurrencyHelper
 	userMsgQueueHelper        *UserMsgQueueHelper
 	maxAccountSwitches        int
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+}
+
+// SetConversationLogService enables admin-only conversation capture.
+func (h *GatewayHandler) SetConversationLogService(svc *service.ConversationLogService) {
+	h.conversationLogService = svc
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -169,6 +176,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	capture := beginConversationCapture(c, h.conversationLogService,
+		conversationLogMeta(c, apiKey, subject, service.PlatformAnthropic, service.ContentModerationProtocolAnthropicMessages, reqStream, reqModel), body)
+	defer capture.finish()
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
@@ -344,6 +354,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
+			capture.setAccount(account)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
@@ -632,6 +643,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
+			capture.setAccount(account)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// [DEBUG-STICKY] 打印账号选择结果
@@ -992,6 +1004,66 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 	}
+}
+
+func conversationLogMeta(
+	c *gin.Context,
+	apiKey *service.APIKey,
+	subject middleware2.AuthSubject,
+	fallbackProvider string,
+	protocol string,
+	stream bool,
+	model string,
+) conversationlog.Meta {
+	meta := conversationlog.Meta{
+		RequestID: strings.TrimSpace(conversationRequestID(c)),
+		UserID:    int64Pointer(subject.UserID),
+		Provider:  fallbackProvider,
+		Endpoint:  GetInboundEndpoint(c),
+		Protocol:  protocol,
+		Transport: conversationTransport(stream),
+		Model:     model,
+		StartedAt: time.Now().UTC(),
+	}
+	if apiKey == nil {
+		return meta
+	}
+	meta.APIKeyID = int64Pointer(apiKey.ID)
+	meta.APIKeyNameSnapshot = apiKey.Name
+	meta.GroupID = apiKey.GroupID
+	if apiKey.User != nil {
+		meta.UsernameSnapshot = apiKey.User.Username
+		meta.UserEmailSnapshot = apiKey.User.Email
+	}
+	if apiKey.Group != nil {
+		meta.GroupNameSnapshot = apiKey.Group.Name
+		if provider := strings.TrimSpace(apiKey.Group.Platform); provider != "" {
+			meta.Provider = provider
+		}
+	}
+	return meta
+}
+
+func conversationRequestID(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	if requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
+		return requestID
+	}
+	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
+	return clientRequestID
+}
+
+func conversationTransport(stream bool) string {
+	if stream {
+		return "sse"
+	}
+	return "http"
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
 }
 
 // Models handles listing available models

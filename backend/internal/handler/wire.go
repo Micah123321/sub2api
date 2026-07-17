@@ -45,6 +45,7 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	conversationLogHandler *admin.ConversationLogHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
@@ -83,6 +84,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		ConversationLog:        conversationLogHandler,
 	}
 }
 
@@ -103,11 +105,13 @@ func ProvideGatewayHandler(
 	cfg *config.Config,
 	settingService *service.SettingService,
 	coordinator *securityaudit.Coordinator,
+	conversationLogService *service.ConversationLogService,
 ) *GatewayHandler {
 	h := NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
 		userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool,
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
 	h.securityAuditCoordinator = coordinator
+	h.SetConversationLogService(conversationLogService)
 	return h
 }
 
@@ -122,10 +126,12 @@ func ProvideOpenAIGatewayHandler(
 	opsService *service.OpsService,
 	cfg *config.Config,
 	coordinator *securityaudit.Coordinator,
+	conversationLogService *service.ConversationLogService,
 ) *OpenAIGatewayHandler {
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.securityAuditCoordinator = coordinator
+	h.SetConversationLogService(conversationLogService)
 	return h
 }
 
@@ -259,6 +265,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	admin.NewConversationLogHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

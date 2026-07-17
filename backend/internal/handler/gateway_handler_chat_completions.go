@@ -85,6 +85,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	capture := beginConversationCapture(c, h.conversationLogService,
+		conversationLogMeta(c, apiKey, subject, service.PlatformAnthropic, service.ContentModerationProtocolOpenAIChat, reqStream, reqModel), body)
+	defer capture.finish()
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -197,6 +200,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		capture.setAccount(account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot

@@ -7,6 +7,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/conversationlog"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -459,6 +460,17 @@ func ProvideAuditLogService(repo AuditLogRepository, settingService *SettingServ
 	return svc
 }
 
+// ProvideConversationLogService starts compressed conversation persistence.
+func ProvideConversationLogService(repo conversationlog.Repository, cfg *config.Config) *ConversationLogService {
+	key := []byte(nil)
+	if cfg != nil {
+		key = []byte(cfg.JWT.Secret)
+	}
+	svc := NewConversationLogServiceWithDeleteTokenKey(repo, key)
+	svc.Start()
+	return svc
+}
+
 func buildIdempotencyConfig(cfg *config.Config) IdempotencyConfig {
 	idempotencyCfg := DefaultIdempotencyConfig()
 	if cfg != nil {
@@ -715,6 +727,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsSystemLogSink,
 	ProvideOpsService,
 	ProvideAuditLogService,
+	ProvideConversationLogService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,
 	ProvideOpsAlertEvaluatorService,

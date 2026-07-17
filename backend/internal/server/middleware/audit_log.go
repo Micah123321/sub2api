@@ -58,6 +58,7 @@ var auditExtraAllowedKeys = map[string]struct{}{
 	"http_status": {}, "latency_ms": {}, "token_applied": {}, "retryable": {},
 	"event_id": {}, "requested_count": {}, "deleted_events": {}, "deleted_jobs": {},
 	"matched_count": {}, "snapshot_max_id": {}, "filter_hash": {}, "confirm": {},
+	"conversation_log_id": {}, "action": {},
 }
 
 // SetAuditExtra adds allowlisted, scalar details to the current audit entry.
@@ -118,6 +119,7 @@ var auditSensitiveReads = map[string]string{
 	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
 	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
 	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
+	"GET /api/v1/admin/conversation-logs/:id":     "admin.conversation_logs.detail.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。

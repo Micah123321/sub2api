@@ -193,6 +193,7 @@ export default {
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
+    conversationLogs: 'Conversation Logs',
     auditLogs: 'Audit Logs',
   },
 

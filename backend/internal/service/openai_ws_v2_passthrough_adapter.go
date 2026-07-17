@@ -18,7 +18,8 @@ import (
 )
 
 type openAIWSClientFrameConn struct {
-	conn *coderws.Conn
+	conn       *coderws.Conn
+	afterWrite func(msgType coderws.MessageType, payload []byte)
 }
 
 // openAIWSPolicyEnforcingFrameConn wraps a client-side FrameConn and runs
@@ -217,7 +218,13 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 			payload = normalized
 		}
 	}
-	return c.conn.Write(ctx, msgType, payload)
+	if err := c.conn.Write(ctx, msgType, payload); err != nil {
+		return err
+	}
+	if c.afterWrite != nil {
+		c.afterWrite(msgType, payload)
+	}
+	return nil
 }
 
 func (c *openAIWSClientFrameConn) Close() error {
@@ -303,7 +310,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 		if eventBytes != nil {
 			writeCtx, cancelWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+			if writeErr := clientConn.Write(writeCtx, coderws.MessageText, eventBytes); writeErr == nil {
+				notifyOpenAIWSAfterResponse(hooks, 1, coderws.MessageText, eventBytes)
+			}
 			cancelWrite()
 		}
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
@@ -432,7 +441,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	completedTurns := atomic.Int32{}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
-		inner: &openAIWSClientFrameConn{conn: clientConn},
+		inner: &openAIWSClientFrameConn{
+			conn: clientConn,
+			afterWrite: func(msgType coderws.MessageType, payload []byte) {
+				notifyOpenAIWSAfterResponse(hooks, int(completedTurns.Load())+1, msgType, payload)
+			},
+		},
 		// 注意线程安全：filter 仅在 runClientToUpstream 这一条
 		// goroutine 中被调用（passthrough_relay.go: ReadFrame loop），
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
@@ -515,7 +529,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return
 			}
 			writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-			_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+			if writeErr := clientConn.Write(writeCtx, coderws.MessageText, eventBytes); writeErr == nil {
+				notifyOpenAIWSAfterResponse(hooks, int(completedTurns.Load())+1, coderws.MessageText, eventBytes)
+			}
 			cancel()
 		},
 	}

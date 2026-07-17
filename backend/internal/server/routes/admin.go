@@ -116,6 +116,20 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+
+		// 压缩对话日志
+		registerConversationLogRoutes(admin, h)
+	}
+}
+
+func registerConversationLogRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	logs := admin.Group("/conversation-logs")
+	{
+		logs.GET("", h.Admin.ConversationLog.List)
+		logs.GET("/runtime", h.Admin.ConversationLog.Runtime)
+		logs.GET("/:id", h.Admin.ConversationLog.Detail)
+		logs.POST("/delete-preview", h.Admin.ConversationLog.DeletePreview)
+		logs.POST("/delete-by-filter", h.Admin.ConversationLog.DeleteByFilter)
 	}
 }
 

@@ -186,6 +186,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
+	capture := beginConversationCapture(c, h.conversationLogService,
+		conversationLogMeta(c, apiKey, authSubject, service.PlatformGemini, service.ContentModerationProtocolGemini, stream, modelName), body)
+	defer capture.finish()
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && !decision.AllowNextStage {
 		googleSecurityAuditError(c, decision)
@@ -376,6 +379,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		capture.setAccount(account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature

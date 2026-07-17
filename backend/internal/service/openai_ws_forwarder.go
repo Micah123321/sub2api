@@ -212,7 +212,17 @@ type OpenAIWSIngressHooks struct {
 	InitialRequestModel string
 	BeforeTurn          func(turn int) error
 	BeforeRequest       func(turn int, payload []byte, originalModel string) error
-	AfterTurn           func(turn int, result *OpenAIForwardResult, turnErr error)
+	// AfterResponse observes a text event only after it was written to the client.
+	// Binary frames are intentionally excluded from conversation capture.
+	AfterResponse func(turn int, payload []byte)
+	AfterTurn     func(turn int, result *OpenAIForwardResult, turnErr error)
+}
+
+func notifyOpenAIWSAfterResponse(hooks *OpenAIWSIngressHooks, turn int, msgType coderws.MessageType, payload []byte) {
+	if msgType != coderws.MessageText || hooks == nil || hooks.AfterResponse == nil {
+		return
+	}
+	hooks.AfterResponse(turn, payload)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

@@ -350,7 +350,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 			if eventBytes != nil {
 				writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+				if writeErr := clientConn.Write(writeCtx, coderws.MessageText, eventBytes); writeErr == nil {
+					notifyOpenAIWSAfterResponse(hooks, 1, coderws.MessageText, eventBytes)
+				}
 				cancel()
 			}
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
@@ -513,6 +515,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return fmt.Errorf("resolve Grok websocket cache identity: %w", err)
 				}
 			}
+			writeBridgeMessage := func(message []byte) error {
+				writeErr := writeClientMessage(message)
+				if writeErr == nil {
+					notifyOpenAIWSAfterResponse(hooks, turn, coderws.MessageText, message)
+				}
+				return writeErr
+			}
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
 				ctx,
 				c,
@@ -526,7 +535,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				currentBridgePayload.imageInputSize,
 				grokCacheIdentity,
 				turn,
-				writeClientMessage,
+				writeBridgeMessage,
 			)
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
@@ -950,6 +959,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				} else {
 					wroteDownstream = true
+					notifyOpenAIWSAfterResponse(hooks, turn, coderws.MessageText, upstreamMessage)
 				}
 			}
 			if isTerminalEvent {
@@ -994,6 +1004,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					ResponseHeaders:       lease.HandshakeHeaders(),
 					Duration:              time.Since(turnStart),
 					FirstTokenMs:          firstTokenMs,
+					ClientDisconnect:      clientDisconnected,
 				}
 				if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 					result.wsReplayInput = replayInput

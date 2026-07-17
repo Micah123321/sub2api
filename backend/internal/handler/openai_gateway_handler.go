@@ -9,9 +9,11 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/conversationlog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -35,6 +37,7 @@ type OpenAIGatewayHandler struct {
 	errorPassthroughService  *service.ErrorPassthroughService
 	contentModerationService *service.ContentModerationService
 	securityAuditCoordinator *securityaudit.Coordinator
+	conversationLogService   *service.ConversationLogService
 	opsService               *service.OpsService
 	concurrencyHelper        *ConcurrencyHelper
 	imageLimiter             *imageConcurrencyLimiter
@@ -42,10 +45,44 @@ type OpenAIGatewayHandler struct {
 	cfg                      *config.Config
 }
 
+// SetConversationLogService enables admin-only conversation capture.
+func (h *OpenAIGatewayHandler) SetConversationLogService(svc *service.ConversationLogService) {
+	h.conversationLogService = svc
+}
+
 const maxOpenAIFirstOutputTimeoutSwitches = 1
 
 func openAIForwardSucceededForScheduling(result *service.OpenAIForwardResult) bool {
 	return result.SucceededForScheduling()
+}
+
+func openAIWSConversationStatus(result *service.OpenAIForwardResult, turnErr error) (string, int) {
+	if result != nil {
+		switch strings.TrimSpace(result.UpstreamTerminalEvent) {
+		case "response.failed":
+			return "failed", http.StatusBadGateway
+		case "response.incomplete":
+			return "partial", http.StatusPartialContent
+		case "response.cancelled", "response.canceled":
+			return "cancelled", 499
+		case "response.completed", "response.done":
+			return "completed", http.StatusOK
+		}
+		if result.ClientDisconnect {
+			return "partial", 499
+		}
+	}
+	if turnErr != nil {
+		return "failed", http.StatusBadGateway
+	}
+	return "completed", http.StatusOK
+}
+
+func openAIWSConversationID(payload []byte, fallback string) string {
+	if value := strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String()); value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func resolveOpenAIMessagesDispatchMappedModel(apiKey *service.APIKey, requestedModel string) string {
@@ -272,6 +309,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
+	var capture *conversationCapture
+	if !imageIntent {
+		capture = beginConversationCapture(c, h.conversationLogService,
+			conversationLogMeta(c, apiKey, subject, service.PlatformOpenAI, service.ContentModerationProtocolOpenAIResponses, reqStream, reqModel), sessionHashBody)
+		defer capture.finish()
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
@@ -281,7 +325,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 使用 IsExplicitImageGenerationIntent 排除被动 image_gen namespace 声明。
 	// Codex 在所有请求中被动声明 image_gen namespace，宽泛检测会导致禁了生图的
 	// 分组中所有 Codex 请求被 403（#4447），并误占生图并发槽位。
-	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -438,6 +481,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
+		capture.setAccount(account)
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
@@ -852,6 +896,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqStream := gjson.GetBytes(body, "stream").Bool()
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	requestPlatform := openAICompatibleRequestPlatform(apiKey)
+	capture := beginConversationCapture(c, h.conversationLogService,
+		conversationLogMeta(c, apiKey, subject, requestPlatform,
+			service.ContentModerationProtocolAnthropicMessages, reqStream, reqModel), body)
+	defer capture.finish()
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -871,7 +920,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
@@ -968,6 +1016,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		capture.setAccount(account)
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
@@ -1479,14 +1528,34 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	)
 	setOpsRequestContext(c, reqModel, true)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
+	requestPlatform := openAICompatibleRequestPlatform(apiKey)
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
+	var firstConversationRecorder *conversationlog.Recorder
+	if h.conversationLogService != nil && !imageIntent {
+		meta := conversationLogMeta(c, apiKey, subject, requestPlatform,
+			service.ContentModerationProtocolOpenAIResponses, false, reqModel)
+		meta.Transport = "ws"
+		meta.ConversationID = previousResponseID
+		meta.TurnIndex = 1
+		firstConversationRecorder = conversationlog.NewRecorder(meta, conversationCaptureMaxBytes)
+		if err := firstConversationRecorder.AddRequest(json.RawMessage(append([]byte(nil), firstMessage...))); err != nil &&
+			!errors.Is(err, conversationlog.ErrCaptureLimit) {
+			firstConversationRecorder = nil
+		}
+	}
 
 	if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage, "first_turn"); decision != nil && !decision.AllowNextStage {
 		writeSecurityAuditWSError(ctx, wsConn, decision)
+		if firstConversationRecorder != nil {
+			if record, err := firstConversationRecorder.Finalize("blocked", http.StatusForbidden, 30*24*time.Hour); err == nil {
+				h.conversationLogService.Submit(record)
+			}
+			firstConversationRecorder = nil
+		}
 		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 		return
 	}
 
-	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
 		return
@@ -1554,7 +1623,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 	requiredTransport := service.OpenAIUpstreamTransportResponsesWebsocketV2Ingress
 	if requestPlatform == service.PlatformGrok {
 		requiredTransport = service.OpenAIUpstreamTransportHTTPSSE
@@ -1621,6 +1689,46 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage) && requestPlatform == service.PlatformOpenAI {
 		requiredCapability = service.OpenAIEndpointCapabilityResponses
 	}
+
+	var conversationRecordersMu sync.Mutex
+	conversationRecorders := make(map[int]*conversationlog.Recorder)
+	var conversationAccountID int64
+	var conversationAccountName string
+	lastResponseID := previousResponseID
+	newConversationRecorder := func(turn int, payload []byte, model string) *conversationlog.Recorder {
+		if h.conversationLogService == nil || imageIntent {
+			return nil
+		}
+		meta := conversationLogMeta(c, apiKey, subject, requestPlatform,
+			service.ContentModerationProtocolOpenAIResponses, false, model)
+		meta.Transport = "ws"
+		meta.ConversationID = openAIWSConversationID(payload, lastResponseID)
+		meta.TurnIndex = turn
+		recorder := conversationlog.NewRecorder(meta, conversationCaptureMaxBytes)
+		_ = recorder.SetAccount(conversationAccountID, conversationAccountName)
+		if err := recorder.AddRequest(json.RawMessage(append([]byte(nil), payload...))); err != nil &&
+			!errors.Is(err, conversationlog.ErrCaptureLimit) {
+			return nil
+		}
+		return recorder
+	}
+	conversationRecorders[1] = firstConversationRecorder
+	defer func() {
+		conversationRecordersMu.Lock()
+		remaining := make([]*conversationlog.Recorder, 0, len(conversationRecorders))
+		for _, recorder := range conversationRecorders {
+			if recorder != nil {
+				remaining = append(remaining, recorder)
+			}
+		}
+		clear(conversationRecorders)
+		conversationRecordersMu.Unlock()
+		for _, recorder := range remaining {
+			if record, err := recorder.Finalize("cancelled", 0, 30*24*time.Hour); err == nil {
+				h.conversationLogService.Submit(record)
+			}
+		}
+	}()
 
 	for {
 		if ctx.Err() != nil {
@@ -1717,6 +1825,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.String("schedule_layer", scheduleDecision.Layer),
 			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
+		conversationRecordersMu.Lock()
+		conversationAccountID = account.ID
+		conversationAccountName = account.Name
+		for _, recorder := range conversationRecorders {
+			if recorder != nil {
+				_ = recorder.SetAccount(account.ID, account.Name)
+			}
+		}
+		conversationRecordersMu.Unlock()
 
 		var requestPayloadHash string
 		hooks := &service.OpenAIWSIngressHooks{
@@ -1735,11 +1852,37 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
+				conversationRecordersMu.Lock()
+				if conversationRecorders[turn] == nil {
+					conversationRecorders[turn] = newConversationRecorder(turn, payload, model)
+				}
+				conversationRecordersMu.Unlock()
 				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
+					conversationRecordersMu.Lock()
+					recorder := conversationRecorders[turn]
+					delete(conversationRecorders, turn)
+					conversationRecordersMu.Unlock()
+					if recorder != nil {
+						if record, err := recorder.Finalize("blocked", http.StatusForbidden, 30*24*time.Hour); err == nil {
+							h.conversationLogService.Submit(record)
+						}
+					}
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
 				return nil
+			},
+			AfterResponse: func(turn int, payload []byte) {
+				conversationRecordersMu.Lock()
+				recorder := conversationRecorders[turn]
+				conversationRecordersMu.Unlock()
+				if recorder == nil {
+					return
+				}
+				var value any
+				if json.Unmarshal(payload, &value) == nil {
+					addConversationOutput(recorder, value)
+				}
 			},
 			BeforeTurn: func(turn int) error {
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
@@ -1777,6 +1920,23 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
+				var failoverErr *service.UpstreamFailoverError
+				if errors.As(turnErr, &failoverErr) {
+					return
+				}
+				conversationRecordersMu.Lock()
+				recorder := conversationRecorders[turn]
+				delete(conversationRecorders, turn)
+				if result != nil && strings.TrimSpace(result.ResponseID) != "" {
+					lastResponseID = strings.TrimSpace(result.ResponseID)
+				}
+				conversationRecordersMu.Unlock()
+				if recorder != nil {
+					status, statusCode := openAIWSConversationStatus(result, turnErr)
+					if record, err := recorder.Finalize(status, statusCode, 30*24*time.Hour); err == nil {
+						h.conversationLogService.Submit(record)
+					}
+				}
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；
 				// CyberBlocked 必须在 submit 前同步预捕获（task 闭包由 worker 池异步执行，
 				// 届时 defer 已清除标记）。

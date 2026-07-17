@@ -85,8 +85,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 	requestCtx := c.Request.Context()
-	if service.IsImageGenerationIntentForPlatform("/v1/responses", reqModel, body, openAICompatibleRequestPlatform(apiKey)) {
+	imageIntent := service.IsImageGenerationIntentForPlatform("/v1/responses", reqModel, body, openAICompatibleRequestPlatform(apiKey))
+	var capture *conversationCapture
+	if imageIntent {
 		requestCtx = service.WithOpenAIImageGenerationIntent(requestCtx)
+	} else {
+		capture = beginConversationCapture(c, h.conversationLogService,
+			conversationLogMeta(c, apiKey, subject, service.PlatformAnthropic, service.ContentModerationProtocolOpenAIResponses, reqStream, reqModel), body)
+		defer capture.finish()
 	}
 
 	// 解析渠道级模型映射
@@ -191,6 +197,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		capture.setAccount(account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot

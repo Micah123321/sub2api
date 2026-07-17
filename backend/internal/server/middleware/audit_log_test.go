@@ -145,3 +145,20 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 		require.Truef(t, omitted, "%s must not persist its credential or confirmation-bearing body", route)
 	}
 }
+
+func TestConversationLogDetailAuditAllowlist(t *testing.T) {
+	require.Equal(t, "admin.conversation_logs.detail.read", auditSensitiveReads["GET /api/v1/admin/conversation-logs/:id"])
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	SetAuditExtra(c, map[string]any{
+		"conversation_log_id": int64(42),
+		"action":              "view_detail",
+		"payload":             "must-not-be-recorded",
+	})
+	value, ok := c.Get(auditCtxKeyExtra)
+	require.True(t, ok)
+	extra := value.(map[string]any)
+	require.EqualValues(t, 42, extra["conversation_log_id"])
+	require.Equal(t, "view_detail", extra["action"])
+	require.NotContains(t, extra, "payload")
+}
