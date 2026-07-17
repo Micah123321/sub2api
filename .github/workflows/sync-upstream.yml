@@ -40,7 +40,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           BEFORE="$(git rev-parse HEAD)"
-          git merge --no-edit upstream/main
+          # Prefer custom-branch customizations on textual conflicts
+          # (e.g. deploy/docker-compose.yml default image / GHCR envs).
+          git merge -X ours --no-edit upstream/main
           AFTER="$(git rev-parse HEAD)"
 
           if [ "$BEFORE" = "$AFTER" ]; then
