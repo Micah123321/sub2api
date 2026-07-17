@@ -336,6 +336,7 @@ func (s *AccountRepoSuite) TestListWithFilters_PlanType() {
 		Platform:        service.PlatformOpenAI,
 		Type:            service.AccountTypeOAuth,
 		ParentAccountID: &parentID,
+		QuotaDimension:  service.QuotaDimensionSpark,
 	})
 	mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "grok-plus",
