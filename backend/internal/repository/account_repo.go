@@ -817,7 +817,11 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		q = q.Where(dbaccount.PlatformEQ(service.PlatformOpenAI))
 		planTypePredicate := func(s *entsql.Selector) {
 			column := s.C(dbaccount.FieldCredentials)
-			s.Where(entsql.ExprP("LOWER(BTRIM("+column+"->>'plan_type')) = ?", planType))
+			s.Where(entsql.P(func(b *entsql.Builder) {
+				b.WriteString("LOWER(BTRIM(" + column + "->>'plan_type'))").
+					WriteOp(entsql.OpEQ).
+					Arg(planType)
+			}))
 		}
 		credentialPlanType := dbpredicate.Account(planTypePredicate)
 		parentPlanType := dbpredicate.Account(planTypePredicate)
