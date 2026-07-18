@@ -23,6 +23,8 @@ export default {
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
     updateAvailable: 'A new version is available!',
+    versionCheckFailed: 'Version check failed. Please retry.',
+    versionCheckWarning: 'The latest version could not be verified. Please retry.',
     releaseNotes: 'Release Notes',
     noReleaseNotes: 'No release notes',
     viewUpdate: 'View Update',
@@ -36,8 +38,10 @@ export default {
     updateComplete: 'Update Complete',
     updateFailed: 'Update Failed',
     restartRequired: 'Please restart the service to apply the update',
+    noRestartRequired: 'Update applied. No restart is required.',
     restartNow: 'Restart Now',
     restarting: 'Restarting...',
+    restartFailed: 'Service restart failed. Please retry.',
     retry: 'Retry',
     rollback: 'Version Rollback',
     rollbackSelectVersion: 'Select a version to roll back to (last 3 versions)',
@@ -64,7 +68,9 @@ export default {
     channelSwitching: 'Switching...',
     manualUpdateHint: 'One-click update is not available for this deployment. Update manually with the command below.',
     manualUpdateCommand: 'Manual update command',
-    nonDockerNoOneClick: 'One-click update is unavailable outside Docker. Use the CLI to update manually.'
+    manualCommandUnavailable: 'No manual update command is available. Confirm the deployment method with an administrator.',
+    nonDockerNoOneClick: 'One-click update is unavailable outside Docker. Use the CLI to update manually.',
+    unsupportedUpdateMethod: 'The current update method is unsupported. Update manually or contact an administrator.'
   },
 
   // Recharge / Subscription Page

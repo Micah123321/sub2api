@@ -315,7 +315,7 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 ghcr.io/micah123321/sub2api:custom
 ```
 
-浮动标签 `custom` 对应 custom 分支最新成功构建；也可钉死 `custom-<short_sha>`。
+浮动标签 `custom` 是 custom 分支最新成功构建的默认部署事实源；也可钉死 `custom-<short_sha>` 用于追溯和回退。管理后台只有在 GHCR 能确认标签所属版本和元数据时才提示 custom 升级。
 
 #### 前置条件
 
@@ -473,7 +473,7 @@ docker compose up -d
 docker compose up -d
 ```
 
-管理后台也可切换 **custom** 更新通道检测 GHCR 标签；Docker 场景会写入 `data/pending_image_tag`，再由 `pull` / 重建容器落地。
+管理后台也可切换 **custom** 更新通道检测 GHCR 标签；Docker 场景会在候选已验证时写入 `data/pending_image_tag`，再由 `pull` / 重建容器落地。镜像回退不等于数据库回退，数据库迁移仍需按备份和迁移策略处理。
 
 #### 轻松迁移（本地目录版）
 

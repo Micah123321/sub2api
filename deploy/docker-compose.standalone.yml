@@ -12,7 +12,7 @@
 
 services:
   sub2api:
-    # custom 通道默认镜像（GHCR）；可用 .env 中 SUB2API_IMAGE 覆盖
+    # custom 通道默认 floating 镜像（GHCR）；可用 .env 固定 custom-<short_sha>
     image: ${SUB2API_IMAGE:-ghcr.io/micah123321/sub2api:custom}
     container_name: sub2api
     restart: unless-stopped
@@ -106,6 +106,7 @@ services:
       # Update Configuration (在线更新配置)
       # =======================================================================
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      # custom 是默认部署事实源；custom-<short_sha> 用于固定版本/回退
       - SUB2API_CUSTOM_IMAGE=${SUB2API_CUSTOM_IMAGE:-ghcr.io/micah123321/sub2api}
       - SUB2API_GHCR_TOKEN=${SUB2API_GHCR_TOKEN:-}
       - SUB2API_UPDATE_METHOD=${SUB2API_UPDATE_METHOD:-docker}

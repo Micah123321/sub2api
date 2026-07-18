@@ -78,6 +78,12 @@ jobs:
           SHORT_SHA="$(git rev-parse --short HEAD)"
           FULL_SHA="$(git rev-parse HEAD)"
           IMAGE="ghcr.io/${OWNER_LOWER}/${REPO_NAME}"
+          REF="${{ steps.ref.outputs.ref }}"
+
+          PUBLISH_FLOATING=false
+          if [ "${REF}" = "custom" ] || [ "${REF}" = "refs/heads/custom" ]; then
+            PUBLISH_FLOATING=true
+          fi
 
           VERSION_FILE="backend/cmd/server/VERSION"
           if [ -f "$VERSION_FILE" ]; then
@@ -93,11 +99,20 @@ jobs:
             echo "short_sha=${SHORT_SHA}"
             echo "full_sha=${FULL_SHA}"
             echo "version=${VERSION}"
-            echo "tags=${IMAGE}:custom,${IMAGE}:custom-${SHORT_SHA}"
+            echo "publish_floating=${PUBLISH_FLOATING}"
+            if [ "${PUBLISH_FLOATING}" = "true" ]; then
+              echo "tags=${IMAGE}:custom,${IMAGE}:custom-${SHORT_SHA}"
+            else
+              echo "tags=${IMAGE}:custom-${SHORT_SHA}"
+            fi
           } >> "$GITHUB_OUTPUT"
 
           echo "Image: ${IMAGE}"
-          echo "Tags: custom, custom-${SHORT_SHA}"
+          if [ "${PUBLISH_FLOATING}" = "true" ]; then
+            echo "Tags: custom, custom-${SHORT_SHA}"
+          else
+            echo "Tags: custom-${SHORT_SHA} (floating custom is protected for non-custom refs)"
+          fi
           echo "Version: ${VERSION}"
 
       - name: Build and push
@@ -118,6 +133,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify floating and immutable digests
+        if: steps.meta.outputs.publish_floating == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${{ steps.meta.outputs.image }}"
+          immutable="${image}:custom-${{ steps.meta.outputs.short_sha }}"
+          floating="${image}:custom"
+          immutable_digest="$(docker buildx imagetools inspect "${immutable}" | awk '/^Digest:/ { print $2; exit }')"
+          floating_digest="$(docker buildx imagetools inspect "${floating}" | awk '/^Digest:/ { print $2; exit }')"
+
+          test -n "${immutable_digest}"
+          test -n "${floating_digest}"
+          if [ "${immutable_digest}" != "${floating_digest}" ]; then
+            echo "custom and custom-${{ steps.meta.outputs.short_sha }} point to different digests" >&2
+            echo "floating=${floating_digest} immutable=${immutable_digest}" >&2
+            exit 1
+          fi
+          echo "Verified ${floating} and ${immutable} at ${floating_digest}"
+
       - name: Summary
         shell: bash
         run: |
@@ -125,13 +161,20 @@ jobs:
             echo "## Custom image pushed"
             echo ""
             echo "- Image: \`${{ steps.meta.outputs.image }}\`"
-            echo "- Tags: \`custom\`, \`custom-${{ steps.meta.outputs.short_sha }}\`"
+            if [ "${{ steps.meta.outputs.publish_floating }}" = "true" ]; then
+              echo "- Tags: \`custom\`, \`custom-${{ steps.meta.outputs.short_sha }}\`"
+            else
+              echo "- Tags: \`custom-${{ steps.meta.outputs.short_sha }}\`"
+              echo "- Floating tag: \`custom\` was not changed because the ref is not the custom branch"
+            fi
             echo "- Version: \`${{ steps.meta.outputs.version }}\`"
             echo "- Ref: \`${{ steps.ref.outputs.ref }}\`"
             echo "- Event: \`${{ github.event_name }}\`"
             echo ""
             echo "\`\`\`bash"
-            echo "docker pull ${{ steps.meta.outputs.image }}:custom"
             echo "docker pull ${{ steps.meta.outputs.image }}:custom-${{ steps.meta.outputs.short_sha }}"
+            if [ "${{ steps.meta.outputs.publish_floating }}" = "true" ]; then
+              echo "docker pull ${{ steps.meta.outputs.image }}:custom"
+            fi
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"

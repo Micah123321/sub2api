@@ -5,7 +5,7 @@
 # This script prepares deployment files for this fork's custom image channel:
 #   - Downloads docker-compose.local.yml and .env.example from custom branch
 #   - Generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-#   - Pins SUB2API_IMAGE to ghcr.io/micah123321/sub2api:custom (override via env)
+#   - Uses floating custom as the default image (override with a custom-<short_sha> tag)
 #   - Creates necessary data directories
 #
 # After running this script, you can start services with:
@@ -28,7 +28,7 @@ NC='\033[0m' # No Color
 GITHUB_REPO="${GITHUB_REPO:-Micah123321/sub2api}"
 # Branch that carries deploy assets for this fork
 GITHUB_REF="${GITHUB_REF:-custom}"
-# Runtime image (must include tag). custom floating tag tracks latest custom build.
+# Runtime image (must include tag). custom is the default deployment target.
 DEFAULT_SUB2API_IMAGE="${SUB2API_IMAGE:-ghcr.io/micah123321/sub2api:custom}"
 # GHCR repository without tag (used by in-app custom update channel)
 DEFAULT_SUB2API_CUSTOM_IMAGE="${SUB2API_CUSTOM_IMAGE:-ghcr.io/micah123321/sub2api}"

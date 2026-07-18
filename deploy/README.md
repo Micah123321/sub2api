@@ -56,6 +56,7 @@ ghcr.io/micah123321/sub2api:custom
 ```
 
 Override with `SUB2API_IMAGE` (include tag). In-app custom update channel uses `SUB2API_CUSTOM_IMAGE` (repo without tag) and optional `SUB2API_GHCR_TOKEN`.
+The floating `custom` tag is the default deployment target. Use `custom-<short_sha>` to pin or roll back to a traceable build; the updater only proposes a custom image when registry metadata is verifiable.
 
 ### Method 1: One-Click Deployment (Recommended)
 

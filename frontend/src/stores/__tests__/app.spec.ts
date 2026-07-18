@@ -509,6 +509,31 @@ describe('useAppStore', () => {
       expect(store.updateDigest).toBe('sha256:abc')
     })
 
+    it('fetchVersion 归一化版本、tag 和更新方式', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: 'v0.1.160-custom.e191eba5',
+        latest_version: 'v0.1.160-custom.fca83040',
+        has_update: true,
+        build_type: 'release',
+        cached: false,
+        channel: 'CUSTOM',
+        update_method: ' DOCKER ',
+        image: 'ghcr.io/micah123321/sub2api',
+        latest_tag: ' custom-fca83040 ',
+        digest: ' sha256:fca83040 '
+      })
+
+      const store = useAppStore()
+      await store.fetchVersion(true)
+
+      expect(store.currentVersion).toBe('0.1.160-custom.e191eba5')
+      expect(store.latestVersion).toBe('0.1.160-custom.fca83040')
+      expect(store.updateChannel).toBe('custom')
+      expect(store.updateMethod).toBe('docker')
+      expect(store.latestTag).toBe('custom-fca83040')
+      expect(store.updateDigest).toBe('sha256:fca83040')
+    })
+
     it('fetchVersion 在后端缺少扩展字段时保持兼容', async () => {
       vi.mocked(checkUpdates).mockResolvedValue({
         current_version: '0.1.150',
@@ -526,6 +551,34 @@ describe('useAppStore', () => {
       expect(store.updateImage).toBe('')
       expect(store.latestTag).toBe('')
       expect(store.manualCommand).toBe('')
+    })
+
+    it('fetchVersion 失败时清除旧升级结论并暴露错误状态', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({
+        current_version: '0.1.150',
+        latest_version: '0.1.155',
+        has_update: true,
+        build_type: 'release',
+        cached: false,
+        channel: 'custom',
+        update_method: 'docker',
+        latest_tag: 'custom-abc1234'
+      })
+
+      const store = useAppStore()
+      await store.fetchVersion(true)
+      expect(store.hasUpdate).toBe(true)
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      vi.mocked(checkUpdates).mockRejectedValue(new Error('network unavailable'))
+      const data = await store.fetchVersion(true)
+
+      expect(data).toBeNull()
+      expect(store.versionError).toBe('network unavailable')
+      expect(store.hasUpdate).toBe(false)
+      expect(store.latestVersion).toBe('0.1.150')
+      expect(store.latestTag).toBe('')
+      consoleError.mockRestore()
     })
 
     it('setUpdateChannel 调用 API 后清缓存并强制刷新版本', async () => {

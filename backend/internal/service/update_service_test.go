@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -266,6 +267,45 @@ func TestUpdateServiceGetSetChannel(t *testing.T) {
 	require.Equal(t, UpdateChannelCustom, settings.values[SettingKeyUpdateChannel])
 }
 
+func TestUpdateServiceCheckUpdateOfficialChannelRemainsReleaseBased(t *testing.T) {
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelOfficial}}
+	svc := NewUpdateServiceWithOptions(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{release: &GitHubRelease{
+			TagName:     "v0.1.161",
+			Name:        "v0.1.161",
+			Body:        "official release",
+			PublishedAt: "2026-07-18T00:00:00Z",
+			HTMLURL:     "https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.161",
+			Assets: []GitHubAsset{{
+				Name:               "sub2api_linux_amd64",
+				BrowserDownloadURL: "https://github.com/Wei-Shaw/sub2api/releases/download/v0.1.161/sub2api_linux_amd64",
+				Size:               123,
+			}},
+		}},
+		"0.1.160",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo: settings,
+			CustomImage: "ghcr.io/micah123321/sub2api",
+		},
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.False(t, info.Cached)
+	require.Equal(t, UpdateChannelOfficial, info.Channel)
+	require.Equal(t, UpdateMethodBinary, info.UpdateMethod)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, "0.1.161", info.LatestVersion)
+	require.Empty(t, info.Image)
+	require.Empty(t, info.LatestTag)
+	require.Empty(t, info.Digest)
+	require.Empty(t, info.ManualCommand)
+	require.NotNil(t, info.ReleaseInfo)
+	require.Len(t, info.ReleaseInfo.Assets, 1)
+}
+
 func TestUpdateServiceCheckUpdateCustomChannel(t *testing.T) {
 	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
 	ghcr := &updateServiceGHCRClientStub{
@@ -493,4 +533,102 @@ func TestCompareVersionsHandlesCustomSuffix(t *testing.T) {
 func TestValidateDownloadURLAllowsGHCR(t *testing.T) {
 	require.NoError(t, validateDownloadURL("https://ghcr.io/v2/owner/name/blobs/sha256:abc"))
 	require.Error(t, validateDownloadURL("https://evil.example/blob"))
+}
+
+func TestUpdateServiceCustomCacheWithoutVerificationDoesNotReportUpdate(t *testing.T) {
+	cache := &updateServiceCacheStub{}
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	svc := NewUpdateServiceWithOptions(
+		cache,
+		&updateServiceGitHubClientStub{},
+		"0.1.160-custom.e191eba5",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo: settings,
+			CustomImage: "ghcr.io/micah123321/sub2api",
+		},
+	)
+
+	svc.saveToCache(context.Background(), UpdateChannelCustom, &UpdateInfo{
+		LatestVersion: "0.1.160-custom.fca83040",
+		Channel:       UpdateChannelCustom,
+		LatestTag:     "custom-fca83040",
+		Image:         "ghcr.io/micah123321/sub2api",
+	})
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+	require.NoError(t, err)
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.160-custom.e191eba5", info.LatestVersion)
+	require.Empty(t, info.LatestTag)
+	require.Contains(t, info.Warning, "metadata")
+}
+
+func TestUpdateServiceCustomVerifiedCacheUsesKnownTags(t *testing.T) {
+	cache := &updateServiceCacheStub{}
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	svc := NewUpdateServiceWithOptions(
+		cache,
+		&updateServiceGitHubClientStub{},
+		"0.1.160-custom.e191eba5",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo: settings,
+			CustomImage: "ghcr.io/micah123321/sub2api",
+		},
+	)
+
+	svc.saveToCache(context.Background(), UpdateChannelCustom, &UpdateInfo{
+		LatestVersion:    "0.1.160-custom.fca83040",
+		Channel:          UpdateChannelCustom,
+		LatestTag:        "custom-fca83040",
+		Image:            "ghcr.io/micah123321/sub2api",
+		registryVerified: true,
+		knownCustomTags:  []string{"custom-e191eba5", "custom-fca83040"},
+	})
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.True(t, info.HasUpdate)
+	require.Equal(t, "0.1.160-custom.fca83040", info.LatestVersion)
+	require.Equal(t, "custom-fca83040", info.LatestTag)
+	require.Equal(t, "ghcr.io/micah123321/sub2api", info.Image)
+}
+
+func TestUpdateServiceLegacyCustomCacheWithoutVerificationDoesNotReportUpdate(t *testing.T) {
+	cache := &updateServiceCacheStub{}
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	svc := NewUpdateServiceWithOptions(
+		cache,
+		&updateServiceGitHubClientStub{},
+		"0.1.160-custom.e191eba5",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo: settings,
+			CustomImage: "ghcr.io/micah123321/sub2api",
+		},
+	)
+
+	legacyCache, err := json.Marshal(map[string]any{
+		"latest":         "0.1.160-custom.fca83040",
+		"timestamp":      time.Now().Unix(),
+		"channel":        UpdateChannelCustom,
+		"update_method":  UpdateMethodManual,
+		"image":          "ghcr.io/micah123321/sub2api",
+		"latest_tag":     "custom-fca83040",
+		"digest":         "sha256:fca83040",
+		"manual_command": "docker pull ghcr.io/micah123321/sub2api:custom-fca83040",
+	})
+	require.NoError(t, err)
+	cache.data = map[string]string{svc.cacheKey(UpdateChannelCustom): string(legacyCache)}
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.False(t, info.HasUpdate)
+	require.Equal(t, "0.1.160-custom.e191eba5", info.LatestVersion)
+	require.Empty(t, info.LatestTag)
+	require.Empty(t, info.ManualCommand)
+	require.Contains(t, info.Warning, "metadata")
 }

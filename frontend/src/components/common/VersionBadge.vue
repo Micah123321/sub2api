@@ -6,11 +6,23 @@
         @click="toggleDropdown"
         class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors"
         :class="[
-          hasUpdate
-            ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
-            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-800 dark:text-dark-400 dark:hover:bg-dark-700'
+          versionCheckError
+            ? 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
+            : versionCheckWarning
+              ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
+              : hasUpdate
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-800 dark:text-dark-400 dark:hover:bg-dark-700'
         ]"
-        :title="hasUpdate ? t('version.updateAvailable') : t('version.upToDate')"
+        :title="
+          versionCheckError
+            ? t('version.versionCheckFailed')
+            : versionCheckWarning
+              ? t('version.versionCheckWarning')
+              : hasUpdate
+                ? t('version.updateAvailable')
+                : t('version.upToDate')
+        "
       >
         <span v-if="currentVersion" class="font-medium">v{{ currentVersion }}</span>
         <span
@@ -128,7 +140,7 @@
                   <span v-else class="text-2xl font-bold text-gray-400 dark:text-dark-500">--</span>
                   <!-- Show check mark when up to date -->
                   <span
-                    v-if="!hasUpdate"
+                    v-if="!hasUpdate && !versionCheckError && !versionCheckWarning"
                     class="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30"
                   >
                     <svg
@@ -146,15 +158,81 @@
                 </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                   {{
-                    hasUpdate
-                      ? t('version.latestVersion') + ': v' + latestVersion
-                      : t('version.upToDate')
+                    versionCheckError
+                      ? t('version.versionCheckFailed')
+                      : versionCheckWarning
+                        ? t('version.versionCheckWarning')
+                        : hasUpdate
+                          ? t('version.latestVersion') + ': v' + latestVersion
+                          : t('version.upToDate')
                   }}
                 </p>
               </div>
 
-              <!-- Priority 1: Update error (must check before hasUpdate) -->
-              <div v-if="updateError" class="space-y-2">
+              <!-- Priority 1: Version check error -->
+              <div v-if="versionCheckError && !updateError" class="space-y-2">
+                <div
+                  class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800/50 dark:bg-red-900/20"
+                >
+                  <div
+                    class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/50"
+                  >
+                    <Icon
+                      name="x"
+                      size="sm"
+                      :stroke-width="2"
+                      class="text-red-600 dark:text-red-400"
+                    />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-red-700 dark:text-red-300">
+                      {{ t('version.versionCheckFailed') }}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  @click="refreshVersion(true)"
+                  :disabled="loading || switchingChannel"
+                  class="flex w-full items-center justify-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {{ t('version.retry') }}
+                </button>
+              </div>
+
+              <!-- Priority 2: Registry verification warning -->
+              <div v-else-if="versionCheckWarning && !updateError" class="space-y-2">
+                <div
+                  class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-900/20"
+                >
+                  <div
+                    class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/50"
+                  >
+                    <Icon
+                      name="exclamationTriangle"
+                      size="sm"
+                      :stroke-width="2"
+                      class="text-amber-600 dark:text-amber-400"
+                    />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-amber-700 dark:text-amber-300">
+                      {{ t('version.versionCheckWarning') }}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  @click="refreshVersion(true)"
+                  :disabled="loading || switchingChannel"
+                  class="flex w-full items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {{ t('version.retry') }}
+                </button>
+              </div>
+
+              <!-- Priority 3: Update operation error -->
+              <div v-else-if="updateError" class="space-y-2">
                 <div
                   class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800/50 dark:bg-red-900/20"
                 >
@@ -188,8 +266,8 @@
                 </button>
               </div>
 
-              <!-- Priority 2: Update success - need restart -->
-              <div v-else-if="updateSuccess && needRestart" class="space-y-2">
+              <!-- Priority 4: Update success -->
+              <div v-else-if="updateSuccess" class="space-y-2">
                 <div
                   class="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800/50 dark:bg-green-900/20"
                 >
@@ -214,14 +292,25 @@
                           : t('version.updateComplete')
                       }}
                     </p>
-                    <p class="text-xs text-green-600/70 dark:text-green-400/70">
+                    <p v-if="needRestart" class="text-xs text-green-600/70 dark:text-green-400/70">
                       {{ t('version.restartRequired') }}
+                    </p>
+                    <p v-else class="text-xs text-green-600/70 dark:text-green-400/70">
+                      {{ t('version.noRestartRequired') }}
                     </p>
                   </div>
                 </div>
 
+                <p
+                  v-if="restartError"
+                  class="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-600 dark:border-red-800/50 dark:bg-red-900/20 dark:text-red-400"
+                >
+                  {{ restartError }}
+                </p>
+
                 <!-- Restart button with countdown -->
                 <button
+                  v-if="needRestart"
                   @click="handleRestart"
                   :disabled="restarting"
                   class="flex w-full items-center justify-center gap-2 rounded-lg bg-green-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -270,7 +359,7 @@
                 </button>
               </div>
 
-              <!-- Priority 3: Update available for source build - show git pull hint -->
+              <!-- Priority 5: Update available for source build - show git pull hint -->
               <div v-else-if="hasUpdate && !isReleaseBuild" class="space-y-2">
                 <div
                   class="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-900/20"
@@ -317,7 +406,7 @@
                 </div>
               </div>
 
-              <!-- Priority 4: Update available for release build - show update button or manual command -->
+              <!-- Priority 6: Update available for release build - show update button or manual command -->
               <div v-else-if="hasUpdate && isReleaseBuild" class="space-y-2">
                 <!-- Update info card -->
                 <div
@@ -344,7 +433,7 @@
                 </div>
 
                 <!-- Manual deployments: show command instead of one-click update -->
-                <template v-if="isManualUpdateMethod">
+                <template v-if="isManualUpdateMethod || isUnsupportedUpdateMethod">
                   <div
                     class="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 dark:border-blue-800/50 dark:bg-blue-900/20"
                   >
@@ -362,9 +451,20 @@
                       />
                     </svg>
                     <p class="text-xs text-blue-600 dark:text-blue-400">
-                      {{ t('version.nonDockerNoOneClick') }}
+                      {{
+                        isUnsupportedUpdateMethod
+                          ? t('version.unsupportedUpdateMethod')
+                          : t('version.nonDockerNoOneClick')
+                      }}
                     </p>
                   </div>
+
+                  <p
+                    v-if="!displayedManualUpdateCommand"
+                    class="px-0.5 text-xs leading-4 text-gray-500 dark:text-dark-400"
+                  >
+                    {{ t('version.manualCommandUnavailable') }}
+                  </p>
 
                   <div
                     v-if="displayedManualUpdateCommand"
@@ -424,7 +524,7 @@
 
                 </div>
 
-              <!-- Priority 5: Up to date - version rollback -->
+              <!-- Priority 7: Up to date - version rollback -->
               <div v-else class="space-y-2">
                 <!-- Version rollback entry -->
                 <div class="pt-0">
@@ -558,7 +658,7 @@
                                   ? 'text-amber-700 dark:text-amber-300'
                                   : 'text-gray-700 dark:text-dark-200'
                               "
-                              >v{{ item.version }}</span
+                              >v{{ formatVersion(item.version) }}</span
                             >
                           </span>
                           <span class="text-[11px] tabular-nums text-gray-400 dark:text-dark-500">
@@ -665,7 +765,7 @@
                                 rollingBack
                                   ? t('version.rollingBack')
                                   : t('version.rollbackConfirm', {
-                                      version: 'v' + selectedRollbackVersion
+                                      version: `v${formatVersion(selectedRollbackVersion)}`
                                     })
                               }}</span>
                             </button>
@@ -684,7 +784,7 @@
 
     <!-- Non-admin: Simple static version text -->
     <span v-else-if="version" class="text-xs text-gray-500 dark:text-dark-400">
-      v{{ version }}
+      v{{ formatVersion(version) }}
     </span>
   </div>
 </template>
@@ -712,6 +812,16 @@ const DOCKER_IMAGE_CUSTOM = 'ghcr.io/micah123321/sub2api'
 
 const { t } = useI18n()
 
+function formatVersion(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.trim().replace(/^v+/i, '')
+}
+
+function formatDockerTag(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.trim().replace(/^v(?=\d)/i, '')
+}
+
 const props = defineProps<{
   version?: string
 }>()
@@ -726,15 +836,17 @@ const dropdownRef = ref<HTMLElement | null>(null)
 
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
-const currentVersion = computed(() => appStore.currentVersion || props.version || '')
-const latestVersion = computed(() => appStore.latestVersion)
+const versionCheckError = computed(() => Boolean(appStore.versionError))
+const versionCheckWarning = computed(() => Boolean(appStore.versionWarning))
+const currentVersion = computed(() => formatVersion(appStore.currentVersion || props.version || ''))
+const latestVersion = computed(() => formatVersion(appStore.latestVersion))
 const hasUpdate = computed(() => appStore.hasUpdate)
 const buildType = computed(() => appStore.buildType)
 const updateChannel = computed(() => (appStore.updateChannel || 'official') as UpdateChannel | string)
 const updateMethod = computed(() => appStore.updateMethod || '')
-const storeImage = computed(() => appStore.updateImage || '')
-const latestTag = computed(() => appStore.latestTag || '')
-const storeManualCommand = computed(() => appStore.manualCommand || '')
+const storeImage = computed(() => appStore.updateImage?.trim() || '')
+const latestTag = computed(() => appStore.latestTag?.trim() || '')
+const storeManualCommand = computed(() => appStore.manualCommand?.trim() || '')
 
 // Update process states (local to this component)
 const updating = ref(false)
@@ -743,6 +855,7 @@ const pendingChannel = ref<UpdateChannel | null>(null)
 const restarting = ref(false)
 const needRestart = ref(false)
 const updateError = ref('')
+const restartError = ref('')
 const lastErrorKind = ref<'update' | 'channel'>('update')
 const updateSuccess = ref(false)
 const restartCountdown = ref(0)
@@ -771,22 +884,37 @@ const manualTabs = computed(() => [
 
 const isCustomChannel = computed(() => updateChannel.value === 'custom')
 const isManualUpdateMethod = computed(() => updateMethod.value === 'manual')
+const isUnsupportedUpdateMethod = computed(
+  () => Boolean(updateMethod.value) && !['binary', 'docker', 'manual'].includes(updateMethod.value)
+)
+
+const selectedRollbackInfo = computed(() =>
+  rollbackVersions.value.find((item) => item.version === selectedRollbackVersion.value)
+)
 
 const dockerImage = computed(() => {
+  const rollbackImage = selectedRollbackInfo.value?.image?.trim()
+  if (rollbackImage) return rollbackImage
   if (storeImage.value) return storeImage.value
   return isCustomChannel.value ? DOCKER_IMAGE_CUSTOM : DOCKER_IMAGE_OFFICIAL
 })
 
 const dockerRollbackTag = computed(() => {
-  if (selectedRollbackVersion.value) return selectedRollbackVersion.value
-  if (latestTag.value) return latestTag.value
+  if (selectedRollbackVersion.value) {
+    const rollbackTag = selectedRollbackInfo.value?.tag?.trim()
+    return rollbackTag || formatDockerTag(selectedRollbackVersion.value)
+  }
+  if (latestTag.value) {
+    return isCustomChannel.value ? latestTag.value : formatDockerTag(latestTag.value)
+  }
   // Custom channel default tags when backend does not report a specific tag
   return isCustomChannel.value ? 'custom' : 'latest'
 })
 
 const scriptRollbackCommand = computed(() => {
-  if (!selectedRollbackVersion.value) return ''
-  const tag = `v${selectedRollbackVersion.value}`
+  const version = formatVersion(selectedRollbackVersion.value)
+  if (!version) return ''
+  const tag = `v${version}`
   return `curl -sSL https://raw.githubusercontent.com/${GITHUB_REPO}/${tag}/deploy/install.sh | sudo bash -s -- rollback ${tag}`
 })
 
@@ -808,8 +936,11 @@ const activeManualCommand = computed(() =>
 // Manual update command from backend, or a docker fallback for custom channel
 const displayedManualUpdateCommand = computed(() => {
   if (storeManualCommand.value) return storeManualCommand.value
+  if (isUnsupportedUpdateMethod.value) return ''
   if (isCustomChannel.value || updateMethod.value === 'docker') {
-    const tag = latestTag.value || (isCustomChannel.value ? 'custom' : latestVersion.value || 'latest')
+    const tag = isCustomChannel.value
+      ? latestTag.value || 'custom'
+      : formatDockerTag(latestTag.value || latestVersion.value || 'latest')
     return [
       `# ${t('version.dockerEditCompose')}`,
       `image: ${dockerImage.value}:${tag}`,
@@ -832,6 +963,7 @@ async function switchChannel(channel: UpdateChannel) {
   pendingChannel.value = channel
   lastErrorKind.value = 'update'
   updateError.value = ''
+  restartError.value = ''
   updateSuccess.value = false
   needRestart.value = false
   resetRollbackState()
@@ -862,6 +994,7 @@ async function refreshVersion(force = true) {
 
   // Reset update states when refreshing
   updateError.value = ''
+  restartError.value = ''
   updateSuccess.value = false
   needRestart.value = false
   resetRollbackState()
@@ -875,6 +1008,7 @@ async function handleUpdate() {
   updating.value = true
   lastErrorKind.value = 'update'
   updateError.value = ''
+  restartError.value = ''
   updateSuccess.value = false
 
   try {
@@ -950,6 +1084,7 @@ async function handleRollback() {
 
   rollingBack.value = true
   rollbackError.value = ''
+  restartError.value = ''
 
   try {
     const result = await rollbackAPI(selectedRollbackVersion.value)
@@ -972,13 +1107,17 @@ async function handleRestart() {
 
   restarting.value = true
   restartCountdown.value = 8
+  restartError.value = ''
 
   try {
     await restartService()
     // Service will restart, page will reload automatically or show disconnected
-  } catch (error) {
-    // Expected - connection will be lost during restart
-    console.log('Service restarting...')
+  } catch (error: unknown) {
+    const err = error as { response?: { data?: { message?: string } }; message?: string }
+    restartError.value = err.response?.data?.message || err.message || t('version.restartFailed')
+    restarting.value = false
+    restartCountdown.value = 0
+    return
   }
 
   // Start countdown

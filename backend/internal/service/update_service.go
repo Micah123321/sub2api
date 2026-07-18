@@ -78,10 +78,13 @@ type GitHubReleaseClient interface {
 
 // GHCRImageTag represents a container image tag from GHCR / Packages API.
 type GHCRImageTag struct {
-	Tag       string `json:"tag"`
-	Digest    string `json:"digest,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	HTMLURL   string `json:"html_url,omitempty"`
+	Tag              string `json:"tag"`
+	Digest           string `json:"digest,omitempty"`
+	UpdatedAt        string `json:"updated_at,omitempty"`
+	HTMLURL          string `json:"html_url,omitempty"`
+	PackageVersionID string `json:"-"`
+	CreatedAt        string `json:"-"`
+	MetadataVerified bool   `json:"-"`
 }
 
 // GHCRClient lists tags for a GHCR image.
@@ -173,19 +176,21 @@ func NewUpdateServiceWithOptions(cache UpdateCache, githubClient GitHubReleaseCl
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion string       `json:"current_version"`
-	LatestVersion  string       `json:"latest_version"`
-	HasUpdate      bool         `json:"has_update"`
-	ReleaseInfo    *ReleaseInfo `json:"release_info,omitempty"`
-	Cached         bool         `json:"cached"`
-	Warning        string       `json:"warning,omitempty"`
-	BuildType      string       `json:"build_type"` // "source" or "release"
-	Channel        string       `json:"channel,omitempty"`
-	UpdateMethod   string       `json:"update_method,omitempty"` // binary | docker | manual
-	Image          string       `json:"image,omitempty"`
-	LatestTag      string       `json:"latest_tag,omitempty"`
-	Digest         string       `json:"digest,omitempty"`
-	ManualCommand  string       `json:"manual_command,omitempty"`
+	CurrentVersion   string       `json:"current_version"`
+	LatestVersion    string       `json:"latest_version"`
+	HasUpdate        bool         `json:"has_update"`
+	ReleaseInfo      *ReleaseInfo `json:"release_info,omitempty"`
+	Cached           bool         `json:"cached"`
+	Warning          string       `json:"warning,omitempty"`
+	BuildType        string       `json:"build_type"` // "source" or "release"
+	Channel          string       `json:"channel,omitempty"`
+	UpdateMethod     string       `json:"update_method,omitempty"` // binary | docker | manual
+	Image            string       `json:"image,omitempty"`
+	LatestTag        string       `json:"latest_tag,omitempty"`
+	Digest           string       `json:"digest,omitempty"`
+	ManualCommand    string       `json:"manual_command,omitempty"`
+	registryVerified bool         `json:"-"`
+	knownCustomTags  []string     `json:"-"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -704,16 +709,26 @@ func (s *UpdateService) fetchLatestCustom(ctx context.Context) (*UpdateInfo, err
 		return nil, fmt.Errorf("no custom tags found for image %s", s.customImage)
 	}
 
-	// Latest immutable custom-<sha> by package create/update time (not floating retag).
 	latest := pickLatestCustomTag(filtered)
+	registryVerified := customRegistryMetadataAvailable(filtered)
 	method := s.detectUpdateMethod(UpdateChannelCustom)
 	manualCmd := ""
-	if method == UpdateMethodManual {
+	if method == UpdateMethodManual && registryVerified && latest.Tag != "" {
 		manualCmd = fmt.Sprintf("docker pull %s:%s", s.customImage, latest.Tag)
 	}
 
-	hasUpdate := s.customHasUpdate(latest, filtered)
-	displayVersion := s.formatCustomDisplayVersion(latest.Tag)
+	hasUpdate := s.customHasUpdateVerified(latest, filtered, registryVerified)
+	displayVersion := s.currentVersion
+	warning := ""
+	latestTag := latest.Tag
+	digest := latest.Digest
+	if registryVerified {
+		displayVersion = s.formatCustomDisplayVersion(latest.Tag)
+	} else {
+		warning = "custom registry metadata is incomplete; latest image cannot be verified"
+		latestTag = ""
+		digest = ""
+	}
 
 	return &UpdateInfo{
 		CurrentVersion: s.currentVersion,
@@ -722,17 +737,20 @@ func (s *UpdateService) fetchLatestCustom(ctx context.Context) (*UpdateInfo, err
 		ReleaseInfo: &ReleaseInfo{
 			Name:        displayVersion,
 			Body:        "Custom channel image update",
-			PublishedAt: latest.UpdatedAt,
+			PublishedAt: customTagPublishedAt(latest),
 			HTMLURL:     latest.HTMLURL,
 		},
-		Cached:        false,
-		BuildType:     s.buildType,
-		Channel:       UpdateChannelCustom,
-		UpdateMethod:  method,
-		Image:         s.customImage,
-		LatestTag:     latest.Tag,
-		Digest:        latest.Digest,
-		ManualCommand: manualCmd,
+		Cached:           false,
+		Warning:          warning,
+		BuildType:        s.buildType,
+		Channel:          UpdateChannelCustom,
+		UpdateMethod:     method,
+		Image:            s.customImage,
+		LatestTag:        latestTag,
+		Digest:           digest,
+		ManualCommand:    manualCmd,
+		registryVerified: registryVerified,
+		knownCustomTags:  customTagNames(filtered),
 	}, nil
 }
 
@@ -745,6 +763,9 @@ func (s *UpdateService) listCustomRollbackVersions(ctx context.Context) ([]Rollb
 		return nil, err
 	}
 	filtered := filterCustomTags(tags)
+	if !customRegistryMetadataAvailable(filtered) {
+		return []RollbackVersion{}, nil
+	}
 	// Prefer immutable custom-<sha> tags for rollback list; exclude floating "custom"
 	immutable := make([]GHCRImageTag, 0, len(filtered))
 	for _, t := range filtered {
@@ -765,7 +786,7 @@ func (s *UpdateService) listCustomRollbackVersions(ctx context.Context) ([]Rollb
 		}
 		out = append(out, RollbackVersion{
 			Version:     s.formatCustomDisplayVersion(t.Tag),
-			PublishedAt: t.UpdatedAt,
+			PublishedAt: customTagPublishedAt(t),
 			HTMLURL:     t.HTMLURL,
 			Tag:         t.Tag,
 			Digest:      t.Digest,
@@ -821,6 +842,13 @@ func (s *UpdateService) customHasUpdate(latest GHCRImageTag, allTags []GHCRImage
 		return true
 	}
 	return compareVersions(s.currentVersion, latest.Tag) < 0
+}
+
+func (s *UpdateService) customHasUpdateVerified(latest GHCRImageTag, allTags []GHCRImageTag, verified bool) bool {
+	if !verified {
+		return false
+	}
+	return s.customHasUpdate(latest, allTags)
 }
 
 // formatCustomDisplayVersion maps registry tags to UI-friendly versions aligned
@@ -1106,15 +1134,18 @@ func (s *UpdateService) getFromCache(ctx context.Context, channel string) (*Upda
 	}
 
 	var cached struct {
-		Latest        string       `json:"latest"`
-		ReleaseInfo   *ReleaseInfo `json:"release_info"`
-		Timestamp     int64        `json:"timestamp"`
-		Channel       string       `json:"channel"`
-		UpdateMethod  string       `json:"update_method"`
-		Image         string       `json:"image"`
-		LatestTag     string       `json:"latest_tag"`
-		Digest        string       `json:"digest"`
-		ManualCommand string       `json:"manual_command"`
+		Latest           string       `json:"latest"`
+		ReleaseInfo      *ReleaseInfo `json:"release_info"`
+		Timestamp        int64        `json:"timestamp"`
+		Channel          string       `json:"channel"`
+		UpdateMethod     string       `json:"update_method"`
+		Image            string       `json:"image"`
+		LatestTag        string       `json:"latest_tag"`
+		Digest           string       `json:"digest"`
+		ManualCommand    string       `json:"manual_command"`
+		Warning          string       `json:"warning"`
+		RegistryVerified bool         `json:"registry_verified"`
+		KnownCustomTags  []string     `json:"known_custom_tags"`
 	}
 	if err := json.Unmarshal([]byte(data), &cached); err != nil {
 		return nil, err
@@ -1146,58 +1177,82 @@ func (s *UpdateService) getFromCache(ctx context.Context, channel string) (*Upda
 		}
 	}
 
+	latestDisplay := cached.Latest
 	hasUpdate := false
 	if ch == UpdateChannelCustom {
-		// Cache path has no full tag list; recompute with latest only.
-		// Local-ahead false positives require a forced refresh to clear.
-		hasUpdate = s.customHasUpdate(GHCRImageTag{Tag: coalesceString(latestTag, cached.Latest), Digest: cached.Digest}, nil)
+		knownTags := make([]GHCRImageTag, 0, len(cached.KnownCustomTags))
+		for _, tag := range cached.KnownCustomTags {
+			knownTags = append(knownTags, GHCRImageTag{Tag: tag})
+		}
+		latest := GHCRImageTag{Tag: coalesceString(latestTag, cached.Latest), Digest: cached.Digest}
+		hasUpdate = s.customHasUpdateVerified(latest, knownTags, cached.RegistryVerified)
+		if !cached.RegistryVerified {
+			latestDisplay = s.currentVersion
+			latestTag = ""
+		} else {
+			// Normalize display even for older cache entries that stored raw tags.
+			latestDisplay = s.formatCustomDisplayVersion(coalesceString(latestTag, cached.Latest))
+		}
 	} else {
 		hasUpdate = compareVersions(s.currentVersion, cached.Latest) < 0
 	}
-
-	latestDisplay := cached.Latest
-	if ch == UpdateChannelCustom {
-		// Normalize display even for older cache entries that stored raw tags.
-		latestDisplay = s.formatCustomDisplayVersion(coalesceString(latestTag, cached.Latest))
+	returnedLatestTag := coalesceString(latestTag, cached.LatestTag)
+	returnedManualCommand := cached.ManualCommand
+	warning := cached.Warning
+	if ch == UpdateChannelCustom && !cached.RegistryVerified {
+		returnedLatestTag = ""
+		returnedManualCommand = ""
+		if warning == "" {
+			warning = "custom registry metadata is incomplete; latest image cannot be verified"
+		}
 	}
 
 	return &UpdateInfo{
-		CurrentVersion: s.currentVersion,
-		LatestVersion:  latestDisplay,
-		HasUpdate:      hasUpdate,
-		ReleaseInfo:    cached.ReleaseInfo,
-		Cached:         true,
-		BuildType:      s.buildType,
-		Channel:        ch,
-		UpdateMethod:   method,
-		Image:          cached.Image,
-		LatestTag:      coalesceString(latestTag, cached.LatestTag),
-		Digest:         cached.Digest,
-		ManualCommand:  cached.ManualCommand,
+		CurrentVersion:   s.currentVersion,
+		LatestVersion:    latestDisplay,
+		HasUpdate:        hasUpdate,
+		ReleaseInfo:      cached.ReleaseInfo,
+		Cached:           true,
+		BuildType:        s.buildType,
+		Channel:          ch,
+		UpdateMethod:     method,
+		Image:            cached.Image,
+		LatestTag:        returnedLatestTag,
+		Digest:           cached.Digest,
+		ManualCommand:    returnedManualCommand,
+		Warning:          warning,
+		registryVerified: cached.RegistryVerified,
+		knownCustomTags:  cached.KnownCustomTags,
 	}, nil
 }
 
 func (s *UpdateService) saveToCache(ctx context.Context, channel string, info *UpdateInfo) {
 	cacheData := struct {
-		Latest        string       `json:"latest"`
-		ReleaseInfo   *ReleaseInfo `json:"release_info"`
-		Timestamp     int64        `json:"timestamp"`
-		Channel       string       `json:"channel"`
-		UpdateMethod  string       `json:"update_method"`
-		Image         string       `json:"image"`
-		LatestTag     string       `json:"latest_tag"`
-		Digest        string       `json:"digest"`
-		ManualCommand string       `json:"manual_command"`
+		Latest           string       `json:"latest"`
+		ReleaseInfo      *ReleaseInfo `json:"release_info"`
+		Timestamp        int64        `json:"timestamp"`
+		Channel          string       `json:"channel"`
+		UpdateMethod     string       `json:"update_method"`
+		Image            string       `json:"image"`
+		LatestTag        string       `json:"latest_tag"`
+		Digest           string       `json:"digest"`
+		ManualCommand    string       `json:"manual_command"`
+		Warning          string       `json:"warning"`
+		RegistryVerified bool         `json:"registry_verified"`
+		KnownCustomTags  []string     `json:"known_custom_tags"`
 	}{
-		Latest:        info.LatestVersion,
-		ReleaseInfo:   info.ReleaseInfo,
-		Timestamp:     time.Now().Unix(),
-		Channel:       info.Channel,
-		UpdateMethod:  info.UpdateMethod,
-		Image:         info.Image,
-		LatestTag:     info.LatestTag,
-		Digest:        info.Digest,
-		ManualCommand: info.ManualCommand,
+		Latest:           info.LatestVersion,
+		ReleaseInfo:      info.ReleaseInfo,
+		Timestamp:        time.Now().Unix(),
+		Channel:          info.Channel,
+		UpdateMethod:     info.UpdateMethod,
+		Image:            info.Image,
+		LatestTag:        info.LatestTag,
+		Digest:           info.Digest,
+		ManualCommand:    info.ManualCommand,
+		Warning:          info.Warning,
+		RegistryVerified: info.registryVerified,
+		KnownCustomTags:  info.knownCustomTags,
 	}
 
 	data, _ := json.Marshal(cacheData)
@@ -1341,9 +1396,48 @@ func filterCustomTags(tags []GHCRImageTag) []GHCRImageTag {
 	return out
 }
 
-// pickLatestCustomTag selects the newest custom-channel tag by creation/update time.
-// Immutable tags (custom-<sha>) are preferred over the floating "custom" retag so that
-// update detection and version display track real builds chronologically.
+func customRegistryMetadataAvailable(tags []GHCRImageTag) bool {
+	if len(tags) == 0 {
+		return false
+	}
+	for _, tag := range tags {
+		if tag.MetadataVerified || tag.PackageVersionID != "" || tag.CreatedAt != "" || tag.UpdatedAt != "" || strings.HasPrefix(tag.Digest, "sha256:") {
+			return true
+		}
+	}
+	return false
+}
+
+func customTagNames(tags []GHCRImageTag) []string {
+	seen := make(map[string]struct{})
+	for _, tag := range tags {
+		if !strings.HasPrefix(tag.Tag, "custom-") {
+			continue
+		}
+		seen[tag.Tag] = struct{}{}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func customTagPublishedAt(tag GHCRImageTag) string {
+	if strings.TrimSpace(tag.CreatedAt) != "" {
+		return tag.CreatedAt
+	}
+	return tag.UpdatedAt
+}
+
+// pickLatestCustomTag selects the custom tag that represents the deployment target.
+// When package metadata groups floating "custom" with an immutable sibling, that
+// sibling is authoritative. Without grouping metadata, retain the legacy immutable
+// timestamp fallback for compatibility with OCI-only and unit-test inputs.
 func pickLatestCustomTag(tags []GHCRImageTag) GHCRImageTag {
 	if len(tags) == 0 {
 		return GHCRImageTag{}
@@ -1359,6 +1453,23 @@ func pickLatestCustomTag(tags []GHCRImageTag) GHCRImageTag {
 		}
 		if strings.HasPrefix(t.Tag, "custom-") {
 			immutable = append(immutable, t)
+		}
+	}
+	if floating.Tag != "" {
+		for _, candidate := range immutable {
+			if sameGHCRIdentity(floating, candidate) {
+				if len(immutable) == 1 {
+					return candidate
+				}
+				siblings := make([]GHCRImageTag, 0, len(immutable))
+				for _, sibling := range immutable {
+					if sameGHCRIdentity(floating, sibling) {
+						siblings = append(siblings, sibling)
+					}
+				}
+				sortCustomTagsNewestFirst(siblings)
+				return siblings[0]
+			}
 		}
 	}
 	if len(immutable) > 0 {
@@ -1387,8 +1498,8 @@ func sortCustomTagsNewestFirst(tags []GHCRImageTag) {
 
 // compareGHCRTagTime returns 1 if a is newer than b, -1 if older, 0 if equal/unknown.
 func compareGHCRTagTime(a, b GHCRImageTag) int {
-	ta, oka := parseGHCRTime(a.UpdatedAt)
-	tb, okb := parseGHCRTime(b.UpdatedAt)
+	ta, oka := ghcrTagTime(a)
+	tb, okb := ghcrTagTime(b)
 	switch {
 	case oka && okb:
 		if ta.After(tb) {
@@ -1405,6 +1516,23 @@ func compareGHCRTagTime(a, b GHCRImageTag) int {
 	default:
 		return 0
 	}
+}
+
+func ghcrTagTime(tag GHCRImageTag) (time.Time, bool) {
+	if created, ok := parseGHCRTime(tag.CreatedAt); ok {
+		return created, true
+	}
+	return parseGHCRTime(tag.UpdatedAt)
+}
+
+func sameGHCRIdentity(a, b GHCRImageTag) bool {
+	if a.PackageVersionID != "" && b.PackageVersionID != "" {
+		return a.PackageVersionID == b.PackageVersionID
+	}
+	if strings.HasPrefix(a.Digest, "sha256:") && a.Digest == b.Digest {
+		return true
+	}
+	return false
 }
 
 func parseGHCRTime(value string) (time.Time, bool) {

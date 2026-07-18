@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -31,6 +32,35 @@ func TestPickLatestCustomTag_FallsBackToFloating(t *testing.T) {
 	})
 	if got.Tag != "custom" {
 		t.Fatalf("want floating custom, got %q", got.Tag)
+	}
+}
+
+func TestPickLatestCustomTag_PrefersFloatingPackageVersionSibling(t *testing.T) {
+	got := pickLatestCustomTag([]GHCRImageTag{
+		{Tag: "custom", PackageVersionID: "package-42", CreatedAt: "2026-07-18T00:00:00Z"},
+		{Tag: "custom-e191eba5", PackageVersionID: "package-42", CreatedAt: "2026-07-17T00:00:00Z"},
+		{Tag: "custom-fca83040", PackageVersionID: "package-41", CreatedAt: "2026-07-19T00:00:00Z"},
+	})
+
+	if got.Tag != "custom-e191eba5" {
+		t.Fatalf("want floating tag sibling custom-e191eba5, got %q", got.Tag)
+	}
+}
+
+func TestCompareGHCRTagTime_PrefersCreatedAt(t *testing.T) {
+	olderCreatedAt := GHCRImageTag{
+		Tag:       "custom-old",
+		CreatedAt: "2026-07-01T00:00:00Z",
+		UpdatedAt: "2026-07-20T00:00:00Z",
+	}
+	newerCreatedAt := GHCRImageTag{
+		Tag:       "custom-new",
+		CreatedAt: "2026-07-02T00:00:00Z",
+		UpdatedAt: "2026-07-03T00:00:00Z",
+	}
+
+	if compareGHCRTagTime(olderCreatedAt, newerCreatedAt) >= 0 {
+		t.Fatal("created_at should be the primary custom tag ordering field")
 	}
 }
 
@@ -76,5 +106,77 @@ func TestCustomHasUpdate_LocalAheadNotInRegistry(t *testing.T) {
 	// Local/unpublished commit should not force "update available" to an older registry tip.
 	if s.customHasUpdate(GHCRImageTag{Tag: "custom-fca83040"}, all) {
 		t.Fatal("local sha not in registry should not report update")
+	}
+}
+
+func TestUpdateServiceCheckUpdateCustomChannelUsesFloatingSibling(t *testing.T) {
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	ghcr := &updateServiceGHCRClientStub{
+		tags: []GHCRImageTag{
+			{Tag: "custom", PackageVersionID: "42", CreatedAt: "2026-07-18T00:00:00Z"},
+			{Tag: "custom-e191eba5", PackageVersionID: "42", CreatedAt: "2026-07-18T00:00:00Z"},
+			{Tag: "custom-fca83040", PackageVersionID: "41", CreatedAt: "2026-07-19T00:00:00Z"},
+		},
+	}
+	svc := NewUpdateServiceWithOptions(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.160-custom.e191eba5",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo:   settings,
+			GHCRClient:    ghcr,
+			CustomImage:   "ghcr.io/micah123321/sub2api",
+			CurrentCommit: "e191eba5",
+		},
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	if err != nil {
+		t.Fatalf("CheckUpdate returned error: %v", err)
+	}
+	if info.LatestTag != "custom-e191eba5" {
+		t.Fatalf("want floating sibling e191eba5, got %q", info.LatestTag)
+	}
+	if info.LatestVersion != "0.1.160-custom.e191eba5" {
+		t.Fatalf("unexpected latest version %q", info.LatestVersion)
+	}
+	if info.HasUpdate {
+		t.Fatal("running floating custom sibling should not report an update")
+	}
+}
+
+func TestUpdateServiceCheckUpdateCustomChannelUnverifiedMetadataIsConservative(t *testing.T) {
+	settings := &updateServiceSettingRepoStub{values: map[string]string{SettingKeyUpdateChannel: UpdateChannelCustom}}
+	svc := NewUpdateServiceWithOptions(
+		&updateServiceCacheStub{},
+		&updateServiceGitHubClientStub{},
+		"0.1.160-custom.e191eba5",
+		"release",
+		UpdateServiceOptions{
+			SettingRepo: settings,
+			GHCRClient: &updateServiceGHCRClientStub{tags: []GHCRImageTag{
+				{Tag: "custom"},
+				{Tag: "custom-fca83040"},
+			}},
+			CustomImage: "ghcr.io/micah123321/sub2api",
+		},
+	)
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+	if err != nil {
+		t.Fatalf("CheckUpdate returned error: %v", err)
+	}
+	if info.HasUpdate {
+		t.Fatal("unverified custom metadata should not report an update")
+	}
+	if info.LatestVersion != "0.1.160-custom.e191eba5" {
+		t.Fatalf("want current version when candidate is unverified, got %q", info.LatestVersion)
+	}
+	if info.LatestTag != "" {
+		t.Fatalf("unverified candidate must not expose an executable tag, got %q", info.LatestTag)
+	}
+	if info.Warning == "" {
+		t.Fatal("unverified candidate should explain why update detection is conservative")
 	}
 }

@@ -253,7 +253,14 @@ func TestSystemHandlerGetRollbackVersions(t *testing.T) {
 	updateSvc := &systemHandlerUpdateServiceStub{
 		rollbackVersions: []service.RollbackVersion{
 			{Version: "0.1.146", PublishedAt: "2026-07-07T00:00:00Z", HTMLURL: "https://example.com/v0.1.146"},
-			{Version: "0.1.145", PublishedAt: "2026-07-06T00:00:00Z", HTMLURL: "https://example.com/v0.1.145"},
+			{
+				Version:     "0.1.160-custom.e191eba5",
+				PublishedAt: "2026-07-06T00:00:00Z",
+				HTMLURL:     "https://github.com/owner/sub2api/pkgs/container/sub2api/42",
+				Tag:         "custom-e191eba5",
+				Digest:      "sha256:abc",
+				Image:       "ghcr.io/micah123321/sub2api",
+			},
 		},
 	}
 	repo := newMemoryIdempotencyRepoStub()
@@ -276,6 +283,10 @@ func TestSystemHandlerGetRollbackVersions(t *testing.T) {
 	require.Equal(t, 0, body.Code)
 	require.Len(t, body.Data.Versions, 2)
 	require.Equal(t, "0.1.146", body.Data.Versions[0].Version)
+	require.Equal(t, "0.1.160-custom.e191eba5", body.Data.Versions[1].Version)
+	require.Equal(t, "custom-e191eba5", body.Data.Versions[1].Tag)
+	require.Equal(t, "sha256:abc", body.Data.Versions[1].Digest)
+	require.Equal(t, "ghcr.io/micah123321/sub2api", body.Data.Versions[1].Image)
 }
 
 func TestSystemHandlerGetRollbackVersionsError(t *testing.T) {
@@ -324,13 +335,14 @@ func TestSystemHandlerCheckUpdatesReturnsChannelFields(t *testing.T) {
 	updateSvc := &systemHandlerUpdateServiceStub{
 		updateInfo: &service.UpdateInfo{
 			CurrentVersion: "0.1.147",
-			LatestVersion:  "custom",
+			LatestVersion:  "0.1.160-custom.e191eba5",
 			HasUpdate:      true,
 			Channel:        service.UpdateChannelCustom,
 			UpdateMethod:   service.UpdateMethodManual,
 			Image:          "ghcr.io/micah123321/sub2api",
-			LatestTag:      "custom",
-			ManualCommand:  "docker pull ghcr.io/micah123321/sub2api:custom",
+			LatestTag:      "custom-e191eba5",
+			Digest:         "sha256:abc",
+			ManualCommand:  "docker pull ghcr.io/micah123321/sub2api:custom-e191eba5",
 		},
 	}
 	repo := newMemoryIdempotencyRepoStub()
@@ -342,11 +354,14 @@ func TestSystemHandlerCheckUpdatesReturnsChannelFields(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var body struct {
-		Code int                 `json:"code"`
-		Data service.UpdateInfo  `json:"data"`
+		Code int                `json:"code"`
+		Data service.UpdateInfo `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, service.UpdateChannelCustom, body.Data.Channel)
 	require.Equal(t, service.UpdateMethodManual, body.Data.UpdateMethod)
-	require.Equal(t, "custom", body.Data.LatestTag)
+	require.Equal(t, "0.1.160-custom.e191eba5", body.Data.LatestVersion)
+	require.Equal(t, "custom-e191eba5", body.Data.LatestTag)
+	require.Equal(t, "ghcr.io/micah123321/sub2api", body.Data.Image)
+	require.Equal(t, "sha256:abc", body.Data.Digest)
 }

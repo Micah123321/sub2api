@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,10 +141,16 @@ func (c *GHCRClient) listViaPackagesAPI(ctx context.Context, owner, packageName 
 			// Prefer created_at so custom channel versions order by package creation time.
 			// Fall back to updated_at when create time is missing.
 			createdAt := strings.TrimSpace(v.CreatedAt)
-			if createdAt == "" {
-				createdAt = strings.TrimSpace(v.UpdatedAt)
+			updatedAt := strings.TrimSpace(v.UpdatedAt)
+			packageVersionID := strconv.FormatInt(v.ID, 10)
+			if v.ID == 0 {
+				packageVersionID = strings.TrimSpace(v.Name)
 			}
-			digest := strings.TrimSpace(v.Name)
+			digest := ""
+			if strings.HasPrefix(strings.TrimSpace(v.Name), "sha256:") {
+				digest = strings.TrimSpace(v.Name)
+			}
+			metadataVerified := packageVersionID != "" && (createdAt != "" || updatedAt != "")
 			for _, tag := range v.Metadata.Container.Tags {
 				tag = strings.TrimSpace(tag)
 				if tag == "" {
@@ -155,10 +162,13 @@ func (c *GHCRClient) listViaPackagesAPI(ctx context.Context, owner, packageName 
 				}
 				seen[tag] = struct{}{}
 				out = append(out, service.GHCRImageTag{
-					Tag:       tag,
-					Digest:    digest,
-					UpdatedAt: createdAt,
-					HTMLURL:   v.HTMLURL,
+					Tag:              tag,
+					Digest:           digest,
+					UpdatedAt:        updatedAt,
+					HTMLURL:          v.HTMLURL,
+					PackageVersionID: packageVersionID,
+					CreatedAt:        createdAt,
+					MetadataVerified: metadataVerified,
 				})
 			}
 		}

@@ -63,6 +63,9 @@ export interface RollbackVersionInfo {
   version: string
   published_at: string
   html_url: string
+  tag?: string
+  image?: string
+  digest?: string
 }
 
 /**

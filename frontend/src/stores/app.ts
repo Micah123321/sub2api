@@ -41,6 +41,8 @@ export const useAppStore = defineStore('app', () => {
   // Version cache state
   const versionLoaded = ref<boolean>(false)
   const versionLoading = ref<boolean>(false)
+  const versionError = ref<string>('')
+  const versionWarning = ref<string>('')
   const currentVersion = ref<string>('')
   const latestVersion = ref<string>('')
   const hasUpdate = ref<boolean>(false)
@@ -246,22 +248,33 @@ export const useAppStore = defineStore('app', () => {
 
   // ==================== Version Management ====================
 
+  function normalizeVersion(value: unknown): string {
+    if (typeof value !== 'string') return ''
+    return value.trim().replace(/^v+/i, '')
+  }
+
+  function normalizeChannel(value: unknown): UpdateChannel | string {
+    if (typeof value !== 'string') return 'official'
+    const channel = value.trim().toLowerCase()
+    return channel || 'official'
+  }
+
   function applyVersionInfo(data: VersionInfo): void {
-    currentVersion.value = data.current_version
-    latestVersion.value = data.latest_version
-    hasUpdate.value = data.has_update
+    currentVersion.value = normalizeVersion(data.current_version)
+    latestVersion.value = normalizeVersion(data.latest_version)
+    hasUpdate.value = Boolean(data.has_update)
     buildType.value = data.build_type || 'source'
     releaseInfo.value = data.release_info || null
-    // Dual-channel fields: always reset from response so channel switches do not leak state.
-    // Missing/empty backend fields clear previous values rather than preserving them.
-    if (data.channel !== undefined && data.channel !== '') {
-      updateChannel.value = data.channel
-    }
-    updateMethod.value = data.update_method || ''
+    // Missing/empty backend fields fall back to official so a prior custom state cannot leak.
+    updateChannel.value = normalizeChannel(data.channel)
+    updateMethod.value =
+      typeof data.update_method === 'string' ? data.update_method.trim().toLowerCase() : ''
     updateImage.value = data.image || ''
-    latestTag.value = data.latest_tag || ''
+    latestTag.value = typeof data.latest_tag === 'string' ? data.latest_tag.trim() : ''
     manualCommand.value = data.manual_command || ''
-    updateDigest.value = data.digest || ''
+    updateDigest.value = typeof data.digest === 'string' ? data.digest.trim() : ''
+    versionError.value = ''
+    versionWarning.value = typeof data.warning === 'string' ? data.warning.trim() : ''
     versionLoaded.value = true
   }
 
@@ -290,8 +303,8 @@ export const useAppStore = defineStore('app', () => {
     // Return cached data if available and not forcing refresh
     if (versionLoaded.value && !force) {
       return {
-        current_version: currentVersion.value,
-        latest_version: latestVersion.value,
+        current_version: normalizeVersion(currentVersion.value),
+        latest_version: normalizeVersion(latestVersion.value),
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
@@ -301,7 +314,8 @@ export const useAppStore = defineStore('app', () => {
         image: updateImage.value || undefined,
         latest_tag: latestTag.value || undefined,
         manual_command: manualCommand.value || undefined,
-        digest: updateDigest.value || undefined
+        digest: updateDigest.value || undefined,
+        warning: versionWarning.value || undefined
       }
     }
 
@@ -325,6 +339,17 @@ export const useAppStore = defineStore('app', () => {
     } catch (error) {
       if (token === versionFetchToken) {
         console.error('Failed to fetch version:', error)
+        versionError.value = error instanceof Error ? error.message : 'version check failed'
+        versionWarning.value = ''
+        versionLoaded.value = false
+        hasUpdate.value = false
+        latestVersion.value = currentVersion.value
+        releaseInfo.value = null
+        updateMethod.value = ''
+        updateImage.value = ''
+        latestTag.value = ''
+        manualCommand.value = ''
+        updateDigest.value = ''
       }
       return null
     } finally {
@@ -340,6 +365,8 @@ export const useAppStore = defineStore('app', () => {
    */
   function clearVersionCache(): void {
     versionLoaded.value = false
+    versionError.value = ''
+    versionWarning.value = ''
     hasUpdate.value = false
     updateMethod.value = ''
     updateImage.value = ''
@@ -354,7 +381,7 @@ export const useAppStore = defineStore('app', () => {
   async function setUpdateChannel(channel: UpdateChannel): Promise<boolean> {
     try {
       const result = await setUpdateChannelAPI(channel)
-      updateChannel.value = result.channel || channel
+      updateChannel.value = normalizeChannel(result.channel || channel)
       clearVersionCache()
       const data = await fetchVersion(true)
       // Treat refresh failure as unsuccessful switch from UI perspective so callers can retry.
@@ -527,6 +554,8 @@ export const useAppStore = defineStore('app', () => {
     // Version state
     versionLoaded,
     versionLoading,
+    versionError,
+    versionWarning,
     currentVersion,
     latestVersion,
     hasUpdate,

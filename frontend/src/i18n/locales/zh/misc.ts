@@ -23,6 +23,8 @@ export default {
     latestVersion: '最新版本',
     upToDate: '已是最新版本',
     updateAvailable: '有新版本可用！',
+    versionCheckFailed: '版本检查失败，请重试',
+    versionCheckWarning: '暂时无法确认最新版本，请重试',
     releaseNotes: '更新日志',
     noReleaseNotes: '暂无更新日志',
     viewUpdate: '查看更新',
@@ -36,8 +38,10 @@ export default {
     updateComplete: '更新完成',
     updateFailed: '更新失败',
     restartRequired: '请重启服务以应用更新',
+    noRestartRequired: '更新已生效，无需重启服务',
     restartNow: '立即重启',
     restarting: '正在重启...',
+    restartFailed: '服务重启失败，请重试',
     retry: '重试',
     rollback: '版本回退',
     rollbackSelectVersion: '选择要回退到的版本（近 3 个版本）',
@@ -63,7 +67,9 @@ export default {
     channelSwitching: '切换中...',
     manualUpdateHint: '当前部署方式不支持一键升级，请按下方命令手动更新',
     manualUpdateCommand: '手动更新命令',
-    nonDockerNoOneClick: '非 Docker 环境不可一键升级，请使用命令行手动更新'
+    manualCommandUnavailable: '暂无可用的手动更新命令，请联系管理员确认部署方式',
+    nonDockerNoOneClick: '非 Docker 环境不可一键升级，请使用命令行手动更新',
+    unsupportedUpdateMethod: '当前更新方式不受支持，请手动更新或联系管理员'
   },
 
   // Recharge / Subscription Page
