@@ -2,6 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+ * Theme color channels (RGB triplets for Tailwind opacity mods)
+ * data-theme: current | apple  (default = current)
+ * ============================================================ */
+:root,
+[data-theme='current'] {
+  --primary-50: 240 253 250;
+  --primary-100: 204 251 241;
+  --primary-200: 153 246 228;
+  --primary-300: 94 234 212;
+  --primary-400: 45 212 191;
+  --primary-500: 20 184 166;
+  --primary-600: 13 148 136;
+  --primary-700: 15 118 110;
+  --primary-800: 17 94 89;
+  --primary-900: 19 78 74;
+  --primary-950: 4 47 46;
+  --theme-canvas: 249 250 251; /* gray-50 */
+  --theme-ink: 17 24 39; /* gray-900 */
+  --btn-primary-radius: 0.75rem; /* rounded-xl */
+  --btn-primary-shadow: 0 4px 14px rgb(var(--primary-500) / 0.25);
+}
+
+[data-theme='apple'] {
+  /* Action Blue scale derived from DESIGN.md #0066cc */
+  --primary-50: 239 246 255;
+  --primary-100: 219 234 254;
+  --primary-200: 191 219 254;
+  --primary-300: 147 197 253;
+  --primary-400: 96 165 250;
+  --primary-500: 0 102 204; /* #0066cc Action Blue */
+  --primary-600: 0 113 227; /* #0071e3 focus sibling used as hover */
+  --primary-700: 0 90 180;
+  --primary-800: 0 71 142;
+  --primary-900: 0 53 106;
+  --primary-950: 0 32 64;
+  --theme-canvas: 245 245 247; /* parchment #f5f5f7 */
+  --theme-ink: 29 29 31; /* ink #1d1d1f */
+  --btn-primary-radius: 9999px;
+  --btn-primary-shadow: none;
+}
+
 @layer base {
   * {
     @apply border-gray-200 dark:border-dark-700;
@@ -14,6 +56,12 @@
   body {
     @apply bg-gray-50 text-gray-900 dark:bg-dark-950 dark:text-gray-100;
     @apply min-h-screen;
+  }
+
+  /* Apple theme: parchment canvas on light mode */
+  html[data-theme='apple']:not(.dark) body {
+    background-color: rgb(var(--theme-canvas));
+    color: rgb(var(--theme-ink));
   }
 
   /* 自定义滚动条 - 仅针对 Firefox，避免 Chrome 取消 webkit 的全局定制 */
@@ -79,6 +127,36 @@
     @apply text-white shadow-md shadow-primary-500/25;
     @apply hover:from-primary-600 hover:to-primary-700 hover:shadow-lg hover:shadow-primary-500/30;
     @apply dark:shadow-primary-500/20;
+  }
+
+  /* Apple theme: solid pill CTA, no decorative gradient/glow */
+  html[data-theme='apple'] .btn-primary {
+    background-image: none;
+    background-color: rgb(var(--primary-500));
+    border-radius: var(--btn-primary-radius);
+    box-shadow: var(--btn-primary-shadow);
+  }
+
+  html[data-theme='apple'] .btn-primary:hover {
+    background-color: rgb(var(--primary-600));
+    box-shadow: none;
+  }
+
+  html[data-theme='apple'] .btn {
+    border-radius: var(--btn-primary-radius);
+  }
+
+  html[data-theme='apple'] .card,
+  html[data-theme='apple'] .glass-card,
+  html[data-theme='apple'] .card-glass {
+    @apply rounded-[18px] shadow-none;
+    border-color: rgb(224 224 224 / 0.9);
+  }
+
+  html[data-theme='apple'].dark .card,
+  html[data-theme='apple'].dark .glass-card,
+  html[data-theme='apple'].dark .card-glass {
+    border-color: rgb(42 42 44 / 0.9);
   }
 
   .btn-secondary {
