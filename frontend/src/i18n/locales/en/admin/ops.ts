@@ -498,7 +498,8 @@ export default {
           accountErrorCount: 'Error Accounts (excluding temporarily unschedulable)',
           accountErrorRatio: 'Error Account Ratio (%)',
           accountTempUnscheduledCount: 'Temporarily Unschedulable Accounts',
-          overloadAccountCount: 'Overloaded Accounts'
+          overloadAccountCount: 'Overloaded Accounts',
+          keywordNormalAccounts: 'Normal Accounts by Keyword'
         },
         metricDescriptions: {
           successRate: 'Percentage of successful requests in the window (0-100).',
@@ -516,12 +517,14 @@ export default {
           accountErrorCount: 'Number of error accounts within the window (excluding temporarily unschedulable).',
           accountErrorRatio: 'Error account ratio within the window (0-100).',
           accountTempUnscheduledCount: 'Number of accounts currently temporarily unschedulable (e.g. proxy/credential failure auto-eviction).',
-          overloadAccountCount: 'Number of overloaded accounts within the window.'
+          overloadAccountCount: 'Number of overloaded accounts within the window.',
+          keywordNormalAccounts: 'Matches account name, group name, platform, or account ID by keyword and counts accounts with active status.'
         },
         hints: {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',
           groupRequired: 'This is a group-level metric; selecting a group (group_id) is required.',
-          groupOptional: 'Optional: limit the rule to a specific group via group_id.'
+          groupOptional: 'Optional: limit the rule to a specific group via group_id.',
+          keyword: 'The keyword matches account name, group name, platform, and account ID case-insensitively.'
         },
         table: {
           name: 'Name',
@@ -538,6 +541,8 @@ export default {
           groupId: 'Group (group_id)',
           groupPlaceholder: 'Select a group',
           allGroups: 'All groups',
+          keyword: 'Keyword',
+          keywordPlaceholder: 'e.g. claude or team-a',
           threshold: 'Threshold',
           severity: 'Severity',
           window: 'Window (minutes)',
@@ -552,6 +557,7 @@ export default {
           nameRequired: 'Name is required',
           metricRequired: 'Metric is required',
           groupIdRequired: 'group_id is required for group-level metrics',
+          keywordRequired: 'A keyword is required for this metric',
           operatorRequired: 'Operator is required',
           thresholdRequired: 'Threshold must be a number',
           windowRange: 'Window must be one of: 1, 5, 60 minutes',
@@ -632,6 +638,7 @@ export default {
         reportTitle: 'Report Emails',
         recipients: 'Recipients',
         recipientsHint: 'If empty, the system may fallback to the first admin email.',
+        adminFallbackHint: 'When alert recipients are empty, the first active admin email will be used.',
         minSeverity: 'Min Severity',
         minSeverityAll: 'All severities',
         rateLimitPerHour: 'Rate limit per hour',
@@ -648,7 +655,6 @@ export default {
         validation: {
           title: 'Please fix the following issues',
           invalid: 'Invalid email notification config',
-          alertRecipientsRequired: 'Alert emails are enabled but no recipients are configured',
           reportRecipientsRequired: 'Report emails are enabled but no recipients are configured',
           invalidRecipients: 'One or more recipient emails are invalid',
           rateLimitRange: 'Rate limit per hour must be a number ≥ 0',

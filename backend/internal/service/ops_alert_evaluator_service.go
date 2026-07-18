@@ -218,6 +218,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 		rulesEnabled++
 
 		scopePlatform, scopeGroupID, scopeRegion := parseOpsAlertRuleScope(rule.Filters)
+		scopeKeyword := parseOpsAlertRuleKeyword(rule.Filters)
 
 		windowMinutes := rule.WindowMinutes
 		if windowMinutes <= 0 {
@@ -276,10 +277,10 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 				Severity:       strings.TrimSpace(rule.Severity),
 				Status:         OpsAlertStatusFiring,
 				Title:          fmt.Sprintf("%s: %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name)),
-				Description:    buildOpsAlertDescription(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID),
+				Description:    buildOpsAlertDescription(rule, metricValue, windowMinutes, scopePlatform, scopeGroupID, scopeKeyword),
 				MetricValue:    float64Ptr(metricValue),
 				ThresholdValue: float64Ptr(rule.Threshold),
-				Dimensions:     buildOpsAlertDimensions(scopePlatform, scopeGroupID),
+				Dimensions:     buildOpsAlertDimensions(scopePlatform, scopeGroupID, scopeKeyword),
 				FiredAt:        now,
 				CreatedAt:      now,
 			}
@@ -432,6 +433,17 @@ func parseOpsAlertRuleScope(filters map[string]any) (platform string, groupID *i
 	return platform, groupID, region
 }
 
+func parseOpsAlertRuleKeyword(filters map[string]any) string {
+	if filters == nil {
+		return ""
+	}
+	keyword, ok := filters["keyword"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(keyword)
+}
+
 func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	ctx context.Context,
 	rule *OpsAlertRule,
@@ -475,6 +487,22 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 			return 0, true
 		}
 		return float64(availability.Group.AvailableCount), true
+	case "keyword_normal_accounts":
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		keyword := parseOpsAlertRuleKeyword(rule.Filters)
+		if keyword == "" {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		// ha-min: linear scan of the loaded account map; batch or index keyword searches if current Ops scale is exceeded.
+		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
+			return acc.Status == StatusActive && accountMatchesOpsAlertKeyword(acc, keyword)
+		})), true
 	case "group_available_ratio":
 		if groupID == nil || *groupID <= 0 {
 			return 0, false
@@ -618,6 +646,29 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	}
 }
 
+func accountMatchesOpsAlertKeyword(account *AccountAvailability, keyword string) bool {
+	if account == nil {
+		return false
+	}
+	needle := strings.ToLower(strings.TrimSpace(keyword))
+	if needle == "" {
+		return false
+	}
+
+	candidates := []string{
+		account.AccountName,
+		account.GroupName,
+		account.Platform,
+		strconv.FormatInt(account.AccountID, 10),
+	}
+	for _, candidate := range candidates {
+		if strings.Contains(strings.ToLower(candidate), needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func compareMetric(value float64, operator string, threshold float64) bool {
 	switch strings.TrimSpace(operator) {
 	case ">":
@@ -637,7 +688,7 @@ func compareMetric(value float64, operator string, threshold float64) bool {
 	}
 }
 
-func buildOpsAlertDimensions(platform string, groupID *int64) map[string]any {
+func buildOpsAlertDimensions(platform string, groupID *int64, keyword string) map[string]any {
 	dims := map[string]any{}
 	if strings.TrimSpace(platform) != "" {
 		dims["platform"] = strings.TrimSpace(platform)
@@ -645,13 +696,16 @@ func buildOpsAlertDimensions(platform string, groupID *int64) map[string]any {
 	if groupID != nil && *groupID > 0 {
 		dims["group_id"] = *groupID
 	}
+	if strings.TrimSpace(keyword) != "" {
+		dims["keyword"] = strings.TrimSpace(keyword)
+	}
 	if len(dims) == 0 {
 		return nil
 	}
 	return dims
 }
 
-func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64) string {
+func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes int, platform string, groupID *int64, keyword string) string {
 	if rule == nil {
 		return ""
 	}
@@ -661,6 +715,9 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 	}
 	if groupID != nil && *groupID > 0 {
 		scope = fmt.Sprintf("%s group_id=%d", scope, *groupID)
+	}
+	if strings.TrimSpace(keyword) != "" {
+		scope = fmt.Sprintf("%s keyword=%s", scope, strings.TrimSpace(keyword))
 	}
 	if windowMinutes <= 0 {
 		windowMinutes = 1
@@ -691,7 +748,8 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		return false
 	}
 
-	if len(emailCfg.Alert.Recipients) == 0 {
+	recipients := s.resolveOpsAlertRecipients(ctx, emailCfg.Alert.Recipients)
+	if len(recipients) == 0 {
 		return false
 	}
 	if !shouldSendOpsAlertEmailByMinSeverity(strings.TrimSpace(emailCfg.Alert.MinSeverity), strings.TrimSpace(rule.Severity)) {
@@ -710,8 +768,23 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 	subject := fmt.Sprintf("[Ops Alert][%s] %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name))
 	body := buildOpsAlertEmailBody(rule, event)
 
+	anySent := s.sendOpsAlertEmails(ctx, recipients, rule, event, subject, body)
+	if anySent {
+		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
+	}
+	return anySent
+}
+
+func (s *OpsAlertEvaluatorService) sendOpsAlertEmails(
+	ctx context.Context,
+	recipients []string,
+	rule *OpsAlertRule,
+	event *OpsAlertEvent,
+	subject string,
+	body string,
+) bool {
 	anySent := false
-	for _, to := range emailCfg.Alert.Recipients {
+	for _, to := range recipients {
 		addr := strings.TrimSpace(to)
 		if addr == "" {
 			continue
@@ -740,11 +813,49 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		}
 		anySent = true
 	}
-
-	if anySent {
-		_ = s.opsRepo.UpdateAlertEventEmailSent(context.Background(), event.ID, true)
-	}
 	return anySent
+}
+
+func (s *OpsAlertEvaluatorService) resolveOpsAlertRecipients(ctx context.Context, custom []string) []string {
+	recipients := normalizeOpsAlertRecipients(custom)
+	if len(recipients) > 0 || s == nil || s.opsService == nil || s.opsService.userRepo == nil {
+		return recipients
+	}
+
+	admin, err := s.opsService.userRepo.GetFirstAdmin(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] get first admin email failed: %v", err)
+		return recipients
+	}
+	if admin == nil {
+		return recipients
+	}
+	return resolveOpsAlertRecipients(recipients, admin.Email)
+}
+
+func normalizeOpsAlertRecipients(raw []string) []string {
+	normalized := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, recipient := range raw {
+		email := strings.ToLower(strings.TrimSpace(recipient))
+		if email == "" {
+			continue
+		}
+		if _, exists := seen[email]; exists {
+			continue
+		}
+		seen[email] = struct{}{}
+		normalized = append(normalized, email)
+	}
+	return normalized
+}
+
+func resolveOpsAlertRecipients(custom []string, adminEmail string) []string {
+	recipients := normalizeOpsAlertRecipients(custom)
+	if len(recipients) > 0 {
+		return recipients
+	}
+	return normalizeOpsAlertRecipients([]string{adminEmail})
 }
 
 func opsAlertEmailVariables(rule *OpsAlertRule, event *OpsAlertEvent) map[string]string {

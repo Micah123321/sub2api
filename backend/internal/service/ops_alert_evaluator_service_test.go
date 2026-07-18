@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,16 @@ type stubOpsRepo struct {
 	OpsRepository
 	overview *OpsDashboardOverview
 	err      error
+}
+
+type opsAlertUserRepoStub struct {
+	UserRepository
+	admin *User
+	err   error
+}
+
+func (s *opsAlertUserRepoStub) GetFirstAdmin(context.Context) (*User, error) {
+	return s.admin, s.err
 }
 
 func (s *stubOpsRepo) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
@@ -251,4 +262,150 @@ func TestComputeRuleMetricNewIndicators(t *testing.T) {
 			require.InDelta(t, tt.wantValue, gotValue, 0.0001)
 		})
 	}
+}
+
+func TestComputeRuleMetricKeywordNormalAccounts(t *testing.T) {
+	t.Parallel()
+
+	groupID := int64(101)
+	availability := &OpsAccountAvailability{
+		Accounts: map[int64]*AccountAvailability{
+			1: {
+				AccountID:   1,
+				AccountName: "Claude Primary",
+				GroupName:   "Production",
+				Platform:    "Anthropic",
+				Status:      StatusActive,
+			},
+			2: {
+				AccountID:   2,
+				AccountName: "Backup",
+				GroupName:   "Claude Production",
+				Platform:    "Anthropic",
+				Status:      StatusActive,
+			},
+			3: {
+				AccountID:   3,
+				AccountName: "Claude Error",
+				GroupName:   "Production",
+				Platform:    "Anthropic",
+				Status:      StatusError,
+			},
+			4: {
+				AccountID:   404,
+				AccountName: "Backup",
+				GroupName:   "Production",
+				Platform:    "OpenAI",
+				Status:      StatusActive,
+			},
+		},
+	}
+
+	opsService := &OpsService{
+		getAccountAvailability: func(_ context.Context, platform string, gotGroupID *int64) (*OpsAccountAvailability, error) {
+			require.Equal(t, "anthropic", strings.ToLower(platform))
+			require.NotNil(t, gotGroupID)
+			require.Equal(t, groupID, *gotGroupID)
+			return availability, nil
+		},
+	}
+	svc := &OpsAlertEvaluatorService{
+		opsService: opsService,
+		opsRepo:    &stubOpsRepo{},
+	}
+
+	rule := &OpsAlertRule{
+		MetricType: "keyword_normal_accounts",
+		Filters: map[string]any{
+			"keyword":  "cLaUdE",
+			"group_id": groupID,
+		},
+	}
+	got, ok := svc.computeRuleMetric(
+		context.Background(),
+		rule,
+		nil,
+		time.Now().UTC().Add(-time.Minute),
+		time.Now().UTC(),
+		"anthropic",
+		&groupID,
+	)
+	require.True(t, ok)
+	require.Equal(t, 2.0, got)
+}
+
+func TestAccountMatchesOpsAlertKeyword(t *testing.T) {
+	t.Parallel()
+
+	account := &AccountAvailability{
+		AccountID:   2048,
+		AccountName: "Primary",
+		GroupName:   "Claude Team",
+		Platform:    "Anthropic",
+	}
+	require.True(t, accountMatchesOpsAlertKeyword(account, "team"))
+	require.True(t, accountMatchesOpsAlertKeyword(account, "ANTHRO"))
+	require.True(t, accountMatchesOpsAlertKeyword(account, "2048"))
+	require.False(t, accountMatchesOpsAlertKeyword(account, "gemini"))
+	require.False(t, accountMatchesOpsAlertKeyword(nil, "team"))
+}
+
+func TestBuildOpsAlertContextIncludesKeyword(t *testing.T) {
+	t.Parallel()
+
+	groupID := int64(7)
+	dims := buildOpsAlertDimensions("anthropic", &groupID, "claude")
+	require.Equal(t, map[string]any{
+		"platform": "anthropic",
+		"group_id": groupID,
+		"keyword":  "claude",
+	}, dims)
+
+	description := buildOpsAlertDescription(
+		&OpsAlertRule{
+			MetricType: "keyword_normal_accounts",
+			Operator:   "<",
+			Threshold:  2,
+		},
+		1,
+		5,
+		"anthropic",
+		&groupID,
+		"claude",
+	)
+	require.Contains(t, description, "keyword=claude")
+}
+
+func TestResolveOpsAlertRecipients(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t,
+		[]string{"custom@example.com"},
+		resolveOpsAlertRecipients([]string{" Custom@example.com ", "custom@example.com"}, "admin@example.com"),
+	)
+	require.Equal(t,
+		[]string{"admin@example.com"},
+		resolveOpsAlertRecipients([]string{"  "}, " Admin@example.com "),
+	)
+	require.Empty(t, resolveOpsAlertRecipients(nil, " "))
+}
+
+func TestOpsAlertEvaluatorResolvesAdminRecipient(t *testing.T) {
+	t.Parallel()
+
+	svc := &OpsAlertEvaluatorService{
+		opsService: &OpsService{
+			userRepo: &opsAlertUserRepoStub{
+				admin: &User{Email: " Admin@example.com "},
+			},
+		},
+	}
+	require.Equal(t,
+		[]string{"admin@example.com"},
+		svc.resolveOpsAlertRecipients(context.Background(), nil),
+	)
+	require.Equal(t,
+		[]string{"custom@example.com"},
+		svc.resolveOpsAlertRecipients(context.Background(), []string{"custom@example.com"}),
+	)
 }

@@ -498,7 +498,8 @@ export default {
           accountErrorCount: '错误账号数（不含临时不可调度）',
           accountErrorRatio: '错误账号比例 (%)',
           accountTempUnscheduledCount: '临时不可调度账号数',
-          overloadAccountCount: '过载账号数'
+          overloadAccountCount: '过载账号数',
+          keywordNormalAccounts: '关键词正常账号数'
         },
         metricDescriptions: {
           successRate: '统计窗口内成功请求占比（0~100）。',
@@ -516,12 +517,14 @@ export default {
           accountErrorCount: '统计窗口内产生错误的账号数量（不含临时不可调度）。',
           accountErrorRatio: '统计窗口内错误账号占比（0~100）。',
           accountTempUnscheduledCount: '当前处于临时不可调度状态的账号数量（如代理/凭据故障被自动摘除）。',
-          overloadAccountCount: '统计窗口内过载账号数量。'
+          overloadAccountCount: '统计窗口内过载账号数量。',
+          keywordNormalAccounts: '按关键词匹配账号名、分组名、平台或账号 ID 后，统计状态为 active 的账号数量。'
         },
         hints: {
           recommended: '推荐：运算符 {operator}，阈值 {threshold}{unit}',
           groupRequired: '该指标为分组级别指标，必须选择分组（group_id）。',
-          groupOptional: '可选：通过 group_id 将规则限定到某个分组。'
+          groupOptional: '可选：通过 group_id 将规则限定到某个分组。',
+          keyword: '关键词按大小写不敏感方式匹配账号名、分组名、平台和账号 ID。'
         },
         table: {
           name: '名称',
@@ -538,6 +541,8 @@ export default {
           groupId: '分组（group_id）',
           groupPlaceholder: '请选择分组',
           allGroups: '全部分组',
+          keyword: '关键词',
+          keywordPlaceholder: '例如：claude 或 team-a',
           threshold: '阈值',
           severity: '级别',
           window: '统计窗口（分钟）',
@@ -552,6 +557,7 @@ export default {
           nameRequired: '名称不能为空',
           metricRequired: '指标不能为空',
           groupIdRequired: '分组级别指标必须指定 group_id',
+          keywordRequired: '关键词指标必须填写关键词',
           operatorRequired: '运算符不能为空',
           thresholdRequired: '阈值必须为数字',
           windowRange: '统计窗口必须为 1 / 5 / 60 分钟之一',
@@ -632,6 +638,7 @@ export default {
         reportTitle: '报告邮件',
         recipients: '收件人',
         recipientsHint: '若为空，系统可能会回退使用第一个管理员邮箱。',
+        adminFallbackHint: '告警收件人留空时，将使用首个启用管理员的邮箱。',
         minSeverity: '最低级别',
         minSeverityAll: '全部级别',
         rateLimitPerHour: '每小时限额',
@@ -648,7 +655,6 @@ export default {
         validation: {
           title: '请先修正以下问题',
           invalid: '邮件通知配置不合法',
-          alertRecipientsRequired: '已启用告警邮件，但未配置任何收件人',
           reportRecipientsRequired: '已启用报告邮件，但未配置任何收件人',
           invalidRecipients: '存在不合法的收件人邮箱',
           rateLimitRange: '每小时限额必须为 ≥ 0 的数字',

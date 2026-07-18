@@ -157,7 +157,7 @@ const validation = computed(() => {
     }
   }
 
-  // 邮件配置: 启用但无收件人时不阻断保存, 保存时会自动禁用
+  // 邮件配置: 告警邮件允许为空并回退管理员；报告邮件沿用独立配置校验
 
   // 验证高级设置
   if (advancedSettings.value) {
@@ -204,11 +204,8 @@ async function saveAllSettings() {
 
   saving.value = true
   try {
-    // 无收件人时自动禁用邮件通知
+    // 报告邮件没有收件人时仍自动禁用；告警邮件为空时由后端回退管理员邮箱
     if (emailConfig.value) {
-      if (emailConfig.value.alert.enabled && emailConfig.value.alert.recipients.length === 0) {
-        emailConfig.value.alert.enabled = false
-      }
       if (emailConfig.value.report.enabled && emailConfig.value.report.recipients.length === 0) {
         emailConfig.value.report.enabled = false
       }
@@ -299,7 +296,7 @@ async function saveAllSettings() {
               </span>
             </div>
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.ops.settings.recipientsHint') }}
+              {{ t('admin.ops.email.adminFallbackHint') }}
             </p>
           </div>
 

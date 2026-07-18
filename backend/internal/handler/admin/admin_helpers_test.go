@@ -209,6 +209,32 @@ func TestOpsAlertRuleValidation(t *testing.T) {
 
 	require.True(t, isPercentOrRateMetric("error_rate"))
 	require.False(t, isPercentOrRateMetric("concurrency_queue_depth"))
+
+	keywordRule := map[string]json.RawMessage{
+		"name":        json.RawMessage("\"Claude pool\""),
+		"metric_type": json.RawMessage("\"keyword_normal_accounts\""),
+		"operator":    json.RawMessage("\"<\""),
+		"threshold":   json.RawMessage("2"),
+		"filters":     json.RawMessage("{\"keyword\":\"claude\"}"),
+	}
+	_, err = validateOpsAlertRulePayload(keywordRule)
+	require.NoError(t, err)
+
+	for _, filters := range []json.RawMessage{
+		nil,
+		json.RawMessage("{\"keyword\":\"   \"}"),
+		json.RawMessage("{\"keyword\":42}"),
+		json.RawMessage("null"),
+	} {
+		invalidRule := make(map[string]json.RawMessage, len(keywordRule))
+		for key, value := range keywordRule {
+			invalidRule[key] = value
+		}
+		invalidRule["filters"] = filters
+		_, err = validateOpsAlertRulePayload(invalidRule)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "filters.keyword")
+	}
 }
 
 func TestOpsWSHelpers(t *testing.T) {

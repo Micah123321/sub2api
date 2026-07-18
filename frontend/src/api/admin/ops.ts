@@ -683,6 +683,7 @@ export type MetricType =
   | 'group_available_accounts'
   | 'group_available_ratio'
   | 'group_rate_limit_ratio'
+  | 'keyword_normal_accounts'
   | 'account_rate_limited_count'
   | 'account_error_count'
   | 'account_error_ratio'

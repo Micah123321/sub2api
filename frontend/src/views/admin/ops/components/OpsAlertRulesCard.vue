@@ -86,6 +86,8 @@ const isGroupMetricSelected = computed(() => {
   return metricType ? groupMetricTypes.has(metricType) : false
 })
 
+const isKeywordMetricSelected = computed(() => draft.value?.metric_type === 'keyword_normal_accounts')
+
 const draftGroupId = computed<number | null>({
   get() {
     return parsePositiveInt(draft.value?.filters?.group_id)
@@ -102,6 +104,27 @@ const draftGroupId = computed<number | null>({
     }
     if (!draft.value.filters) draft.value.filters = {}
     draft.value.filters.group_id = value
+  }
+})
+
+const draftKeyword = computed<string>({
+  get() {
+    const keyword = draft.value?.filters?.keyword
+    return typeof keyword === 'string' ? keyword : ''
+  },
+  set(value) {
+    if (!draft.value) return
+    const keyword = value.trim()
+    if (!keyword) {
+      if (!draft.value.filters) return
+      delete draft.value.filters.keyword
+      if (Object.keys(draft.value.filters).length === 0) {
+        delete draft.value.filters
+      }
+      return
+    }
+    if (!draft.value.filters) draft.value.filters = {}
+    draft.value.filters.keyword = keyword
   }
 })
 
@@ -236,6 +259,14 @@ const metricDefinitions = computed(() => {
       description: t('admin.ops.alertRules.metricDescriptions.overloadAccountCount'),
       recommendedOperator: '>',
       recommendedThreshold: 0
+    },
+    {
+      type: 'keyword_normal_accounts',
+      group: 'account',
+      label: t('admin.ops.alertRules.metrics.keywordNormalAccounts'),
+      description: t('admin.ops.alertRules.metricDescriptions.keywordNormalAccounts'),
+      recommendedOperator: '<',
+      recommendedThreshold: 2
     }
   ] satisfies MetricDefinition[]
 })
@@ -316,6 +347,9 @@ const editorValidation = computed(() => {
   if (!r.metric_type) errors.push(t('admin.ops.alertRules.validation.metricRequired'))
   if (groupMetricTypes.has(r.metric_type) && !parsePositiveInt(r.filters?.group_id)) {
     errors.push(t('admin.ops.alertRules.validation.groupIdRequired'))
+  }
+  if (r.metric_type === 'keyword_normal_accounts' && !draftKeyword.value.trim()) {
+    errors.push(t('admin.ops.alertRules.validation.keywordRequired'))
   }
   if (!r.operator) errors.push(t('admin.ops.alertRules.validation.operatorRequired'))
   if (!(typeof r.threshold === 'number' && Number.isFinite(r.threshold)))
@@ -534,6 +568,23 @@ function cancelDelete() {
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ isGroupMetricSelected ? t('admin.ops.alertRules.hints.groupRequired') : t('admin.ops.alertRules.hints.groupOptional') }}
+            </p>
+          </div>
+
+          <div v-if="isKeywordMetricSelected" class="md:col-span-2">
+            <label class="input-label">
+              {{ t('admin.ops.alertRules.form.keyword') }}
+              <span class="ml-1 text-red-500">*</span>
+            </label>
+            <input
+              v-model="draftKeyword"
+              type="search"
+              autocomplete="off"
+              class="input"
+              :placeholder="t('admin.ops.alertRules.form.keywordPlaceholder')"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.alertRules.hints.keyword') }}
             </p>
           </div>
 

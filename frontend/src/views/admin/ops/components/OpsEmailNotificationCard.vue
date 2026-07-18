@@ -89,9 +89,6 @@ const editorValidation = computed(() => {
   const errors: string[] = []
   if (!draft.value) return { valid: true, errors }
 
-  if (draft.value.alert.enabled && draft.value.alert.recipients.length === 0) {
-    errors.push(t('admin.ops.email.validation.alertRecipientsRequired'))
-  }
   if (draft.value.report.enabled && draft.value.report.recipients.length === 0) {
     errors.push(t('admin.ops.email.validation.reportRecipientsRequired'))
   }
@@ -310,7 +307,7 @@ onMounted(() => {
                 </button>
               </span>
             </div>
-            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.email.recipientsHint') }}</div>
+            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.email.adminFallbackHint') }}</div>
           </div>
 
           <div>

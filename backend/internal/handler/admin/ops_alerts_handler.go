@@ -26,6 +26,7 @@ var validOpsAlertMetricTypes = []string{
 	"group_available_accounts",
 	"group_available_ratio",
 	"group_rate_limit_ratio",
+	"keyword_normal_accounts",
 	"account_rate_limited_count",
 	"account_error_count",
 	"account_error_ratio",
@@ -102,6 +103,25 @@ func isPercentOrRateMetric(metricType string) bool {
 	}
 }
 
+func validateOpsAlertRuleFilters(raw json.RawMessage, metricType string) error {
+	if metricType != "keyword_normal_accounts" {
+		return nil
+	}
+	if len(raw) == 0 {
+		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
+	}
+
+	var filters map[string]any
+	if err := json.Unmarshal(raw, &filters); err != nil || filters == nil {
+		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
+	}
+	keyword, ok := filters["keyword"].(string)
+	if !ok || strings.TrimSpace(keyword) == "" {
+		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
+	}
+	return nil
+}
+
 func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleValidatedInput, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("invalid request body")
@@ -127,6 +147,9 @@ func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleV
 	metricType = strings.TrimSpace(metricType)
 	if _, ok := validOpsAlertMetricTypeSet[metricType]; !ok {
 		return nil, fmt.Errorf("metric_type must be one of: %s", strings.Join(validOpsAlertMetricTypes, ", "))
+	}
+	if err := validateOpsAlertRuleFilters(raw["filters"], metricType); err != nil {
+		return nil, err
 	}
 
 	var operator string
