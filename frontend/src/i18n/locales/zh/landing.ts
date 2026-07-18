@@ -8,6 +8,38 @@ export default {
     viewOnGithub: '在 GitHub 上查看',
     viewDocs: '查看文档',
     docs: '文档',
+    documentation: {
+      eyebrow: '开发者文档',
+      title: '从第一个请求开始',
+      description: '把 API 密钥、端点和常用接入路径放在一个入口，先跑通，再按需深入。',
+      openFullDocs: '查看完整文档',
+      endpointLabel: 'API 端点',
+      copy: '复制地址',
+      copied: '已复制',
+      copyFailed: '复制失败',
+      cards: {
+        quickStart: {
+          title: '快速开始',
+          description: '创建 API Key，绑定服务分组，发出你的第一个请求。',
+          meta: '三步开始'
+        },
+        apiAccess: {
+          title: 'API 接入',
+          description: '使用 OpenAI-compatible 或 Anthropic Messages 接口接入现有应用。',
+          meta: '统一端点'
+        },
+        cliSdk: {
+          title: 'CLI 与 SDK',
+          description: '为 Claude Code、Codex CLI、OpenCode 或官方 SDK 配置同一套网关地址。',
+          meta: '配置示例'
+        },
+        troubleshooting: {
+          title: '排查问题',
+          description: '从认证、配额、上游限流和请求路径开始定位常见错误。',
+          meta: '常见问题'
+        }
+      }
+    },
     switchToLight: '切换到浅色模式',
     switchToDark: '切换到深色模式',
     dashboard: '控制台',

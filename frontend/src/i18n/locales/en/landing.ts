@@ -8,6 +8,38 @@ export default {
     viewOnGithub: 'View on GitHub',
     viewDocs: 'View Documentation',
     docs: 'Docs',
+    documentation: {
+      eyebrow: 'Developer docs',
+      title: 'Start with your first request',
+      description: 'Keep your API key, endpoint, and common setup paths in one place. Run the first call, then go deeper when needed.',
+      openFullDocs: 'Open full docs',
+      endpointLabel: 'API endpoint',
+      copy: 'Copy address',
+      copied: 'Copied',
+      copyFailed: 'Copy failed',
+      cards: {
+        quickStart: {
+          title: 'Quick start',
+          description: 'Create an API key, attach a service group, and send your first request.',
+          meta: 'Three steps'
+        },
+        apiAccess: {
+          title: 'API access',
+          description: 'Connect an existing app through the OpenAI-compatible or Anthropic Messages interface.',
+          meta: 'One endpoint'
+        },
+        cliSdk: {
+          title: 'CLI and SDKs',
+          description: 'Configure Claude Code, Codex CLI, OpenCode, or an official SDK with the same gateway URL.',
+          meta: 'Setup examples'
+        },
+        troubleshooting: {
+          title: 'Troubleshooting',
+          description: 'Start with authentication, quota, upstream limits, and request paths when a call fails.',
+          meta: 'Common issues'
+        }
+      }
+    },
     switchToLight: 'Switch to Light Mode',
     switchToDark: 'Switch to Dark Mode',
     dashboard: 'Dashboard',

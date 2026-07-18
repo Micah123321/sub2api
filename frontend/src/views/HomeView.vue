@@ -54,16 +54,14 @@
           <!-- UI Theme Switcher -->
           <ThemeSwitcher />
 
-          <!-- Doc Link -->
+          <!-- Documentation anchor -->
           <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
-            :title="t('home.viewDocs')"
+            href="#docs"
+            class="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+            :aria-label="t('home.viewDocs')"
           >
-            <Icon name="book" size="md" />
+            <Icon name="book" size="md" aria-hidden="true" />
+            <span class="hidden text-xs font-medium sm:inline">{{ t('home.docs') }}</span>
           </a>
 
           <!-- Color Mode Toggle -->
@@ -286,6 +284,13 @@
           </div>
         </div>
 
+        <HomeDocumentationCenter
+          :doc-url="docUrl"
+          :is-authenticated="isAuthenticated"
+          :dashboard-path="dashboardPath"
+          :api-base-url="apiBaseUrl"
+        />
+
         <!-- Supported Providers -->
         <div class="mb-8 text-center">
           <h2 class="mb-3 text-2xl font-bold text-gray-900 dark:text-white">
@@ -406,6 +411,7 @@ import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import ThemeSwitcher from '@/components/common/ThemeSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HomeDocumentationCenter from '@/components/home/HomeDocumentationCenter.vue'
 import { useTheme } from '@/composables/useTheme'
 import { sanitizeUrl } from '@/utils/url'
 
@@ -421,6 +427,12 @@ const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
+const apiBaseUrl = computed(() => {
+  const configured = appStore.cachedPublicSettings?.api_base_url || appStore.apiBaseUrl || ''
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const base = (configured || origin).trim().replace(/\/+$/, '')
+  return base.replace(/\/v1$/, '') || origin
+})
 
 // Check if homeContent is a URL (for iframe display)
 const isHomeContentUrl = computed(() => {
