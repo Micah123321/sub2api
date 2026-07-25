@@ -1,0 +1,196 @@
+import type Database from 'better-sqlite3';
+
+const MIGRATION_SQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plugin_users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  agent_id TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS plugin_users_username_uq ON plugin_users(username);
+CREATE INDEX IF NOT EXISTS plugin_users_agent_idx ON plugin_users(agent_id);
+
+CREATE TABLE IF NOT EXISTS main_service_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  base_url TEXT NOT NULL,
+  api_key_ciphertext TEXT NOT NULL,
+  key_version INTEGER NOT NULL DEFAULT 1,
+  updated_by TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS remote_users (
+  id TEXT PRIMARY KEY,
+  main_user_id TEXT NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unknown',
+  role TEXT NOT NULL DEFAULT 'user',
+  balance_minor INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  observed_at INTEGER NOT NULL,
+  sync_status TEXT NOT NULL DEFAULT 'fresh',
+  last_error TEXT,
+  raw_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS remote_users_main_user_uq ON remote_users(main_user_id);
+CREATE INDEX IF NOT EXISTS remote_users_status_idx ON remote_users(status);
+
+CREATE TABLE IF NOT EXISTS remote_usage_records (
+  id TEXT PRIMARY KEY,
+  remote_record_id TEXT NOT NULL,
+  main_user_id TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  tokens INTEGER NOT NULL DEFAULT 0,
+  amount_minor INTEGER NOT NULL DEFAULT 0,
+  occurred_at INTEGER NOT NULL,
+  observed_at INTEGER NOT NULL,
+  raw_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS remote_usage_records_remote_id_uq ON remote_usage_records(remote_record_id);
+CREATE INDEX IF NOT EXISTS remote_usage_records_user_idx ON remote_usage_records(main_user_id);
+
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agents_name_uq ON agents(name);
+
+CREATE TABLE IF NOT EXISTS agent_user_assignments (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  main_user_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  bound_at INTEGER NOT NULL,
+  unbound_at INTEGER,
+  operator_id TEXT,
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_user_assignments_active_uq
+  ON agent_user_assignments(main_user_id) WHERE status = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS agent_user_assignments_agent_idx ON agent_user_assignments(agent_id);
+CREATE INDEX IF NOT EXISTS agent_user_assignments_main_user_idx ON agent_user_assignments(main_user_id);
+
+CREATE TABLE IF NOT EXISTS wallet_accounts (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  balance_minor INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  version INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS wallet_accounts_agent_uq ON wallet_accounts(agent_id);
+
+CREATE TABLE IF NOT EXISTS ledger_transactions (
+  id TEXT PRIMARY KEY,
+  wallet_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  balance_before INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  operator_id TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  related_card_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_transactions_idempotency_uq ON ledger_transactions(idempotency_key);
+CREATE INDEX IF NOT EXISTS ledger_transactions_wallet_idx ON ledger_transactions(wallet_id);
+
+CREATE TABLE IF NOT EXISTS card_batches (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  value_minor INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_by TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS card_batches_agent_idx ON card_batches(agent_id);
+
+CREATE TABLE IF NOT EXISTS cards (
+  id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  display_mask TEXT NOT NULL,
+  value_minor INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  redeemed_at INTEGER,
+  redeemed_by TEXT,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS cards_code_hash_uq ON cards(code_hash);
+CREATE INDEX IF NOT EXISTS cards_batch_idx ON cards(batch_id);
+CREATE INDEX IF NOT EXISTS cards_agent_idx ON cards(agent_id);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  actor_id TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  request_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_logs_action_idx ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at);
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  error_code TEXT,
+  error_message TEXT,
+  meta_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS sync_runs_scope_idx ON sync_runs(scope);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  agent_id TEXT,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
+`;
+
+export const MIGRATION_ID = '0001_init';
+
+export function runMigrations(sqlite: Database.Database): { applied: string[] } {
+  sqlite.exec(MIGRATION_SQL);
+  const existing = sqlite
+    .prepare('SELECT id FROM schema_migrations WHERE id = ?')
+    .get(MIGRATION_ID) as { id: string } | undefined;
+  if (!existing) {
+    sqlite
+      .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+      .run(MIGRATION_ID, Date.now());
+    return { applied: [MIGRATION_ID] };
+  }
+  return { applied: [] };
+}

@@ -1,0 +1,51 @@
+/// <reference types="vite/client" />
+
+export interface ApiEnvelope<T> {
+  code: string;
+  message: string;
+  data?: T;
+  requestId: string;
+}
+
+export interface SessionUser {
+  userId: string;
+  role: 'ADMIN' | 'AGENT';
+  agentId: string | null;
+}
+
+export interface AgentSummary {
+  id: string;
+  name: string;
+  status: 'ACTIVE' | 'DISABLED';
+  notes: string;
+  walletBalanceMinor: number;
+  activeBindings: number;
+  loginUsername: string | null;
+}
+
+export interface CachedRemoteUser {
+  mainUserId: string;
+  username: string;
+  email: string;
+  status: string;
+  balanceMinor: number;
+  currency: string;
+  observedAt: number;
+  syncStatus: string;
+  isStale: boolean;
+  source: 'remote';
+  lastError: string | null;
+}
+
+export function formatMoney(minor: number, currency = 'USD'): string {
+  const sign = minor < 0 ? '-' : '';
+  const abs = Math.abs(minor);
+  const major = Math.floor(abs / 100);
+  const rest = String(abs % 100).padStart(2, '0');
+  return `${sign}${major}.${rest} ${currency}`;
+}
+
+export function formatTime(ts: number | null | undefined): string {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString();
+}

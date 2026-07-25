@@ -1,0 +1,13 @@
+export const SQLITE = Symbol('SQLITE');
+export const APP_DB = Symbol('APP_DB');
+export const AUTH_SERVICE = Symbol('AUTH_SERVICE');
+export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
+export const AUDIT_SERVICE = Symbol('AUDIT_SERVICE');
+export const LEDGER_SERVICE = Symbol('LEDGER_SERVICE');
+export const SETTINGS_SERVICE = Symbol('SETTINGS_SERVICE');
+export const REMOTE_CLIENT = Symbol('REMOTE_CLIENT');
+export const SYNC_SERVICE = Symbol('SYNC_SERVICE');
+export const AGENTS_SERVICE = Symbol('AGENTS_SERVICE');
+export const ASSIGNMENTS_SERVICE = Symbol('ASSIGNMENTS_SERVICE');
+export const CARDS_SERVICE = Symbol('CARDS_SERVICE');
+export const MASTER_KEY = Symbol('MASTER_KEY');
