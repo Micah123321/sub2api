@@ -1,0 +1,15 @@
+# Build context is sub2api-agent-ledger/
+node_modules
+dist
+data
+coverage
+.playwright-report
+test-results
+.env
+.env.*
+!.env.example
+.helloagents
+.git
+**/*.map
+spec
+*.log

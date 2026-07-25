@@ -37,4 +37,15 @@ pnpm test
 pnpm build
 ```
 
+## Docker 部署
+
+独立 compose 位于仓库 `deploy/agent-ledger/`：
+
+```bash
+cp deploy/agent-ledger/.env.example deploy/agent-ledger/.env
+docker compose -f deploy/agent-ledger/docker-compose.yml --env-file deploy/agent-ledger/.env up -d --build
+```
+
+详见 `deploy/agent-ledger/README.md`。
+
 不要把 `.env`、SQLite 文件或真实卡密提交到版本库。
