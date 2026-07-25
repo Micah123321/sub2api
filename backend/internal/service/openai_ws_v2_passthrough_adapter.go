@@ -20,8 +20,12 @@ import (
 )
 
 type openAIWSClientFrameConn struct {
-	conn       *coderws.Conn
-	afterWrite func(msgType coderws.MessageType, payload []byte)
+	conn                 *coderws.Conn
+	controlCtx           context.Context
+	interTurnIdleTimeout time.Duration
+	interTurnStarted     chan struct{}
+	waitingForNextTurn   atomic.Bool
+	afterWrite           func(msgType coderws.MessageType, payload []byte)
 }
 
 // openAIWSPolicyEnforcingFrameConn wraps a client-side FrameConn and runs
@@ -839,19 +843,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	completedTurns := atomic.Int32{}
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
+	// clientFrameConn 同时承担：
+	// 1) 轮次间 idle 超时与 markTurnStarted/Completed 状态
+	// 2) AfterResponse 观测（WriteFrame 成功后 afterWrite）
+	// 必须与 policyClientConn.inner 是同一实例，否则 idle 状态与读路径脱节。
 	clientFrameConn := &openAIWSClientFrameConn{
 		conn:                 clientConn,
 		controlCtx:           ctx,
 		interTurnIdleTimeout: s.openAIWSIngressInterTurnIdleTimeout(),
 		interTurnStarted:     make(chan struct{}, 1),
+		afterWrite: func(msgType coderws.MessageType, payload []byte) {
+			notifyOpenAIWSAfterResponse(hooks, int(completedTurns.Load())+1, msgType, payload)
+		},
 	}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
-		inner: &openAIWSClientFrameConn{
-			conn: clientConn,
-			afterWrite: func(msgType coderws.MessageType, payload []byte) {
-				notifyOpenAIWSAfterResponse(hooks, int(completedTurns.Load())+1, msgType, payload)
-			},
-		},
+		inner: clientFrameConn,
 		// 注意线程安全：filter 仅在 runClientToUpstream 这一条
 		// goroutine 中被调用（passthrough_relay.go: ReadFrame loop），
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
