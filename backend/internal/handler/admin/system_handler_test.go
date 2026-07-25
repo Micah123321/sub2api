@@ -18,22 +18,26 @@ import (
 )
 
 type systemHandlerUpdateServiceStub struct {
-	performErr           error
-	updateInfo           *service.UpdateInfo
-	checkErr             error
-	checkForces          []bool
-	performCall          int
-	rollbackCall         int
-	rollbackToCall       int
-	rollbackToVersions   []string
-	rollbackToErr        error
-	rollbackVersions     []service.RollbackVersion
-	rollbackVersionsErr  error
-	rollbackVersionsCall int
-	channel              string
-	setChannelErr        error
-	getChannelErr        error
-	setChannelCalls      []string
+	performErr            error
+	updateInfo            *service.UpdateInfo
+	checkErr              error
+	checkForces           []bool
+	performCall           int
+	performCtxErr         error
+	performHasDeadline    bool
+	rollbackCall          int
+	rollbackToCall        int
+	rollbackToCtxErr      error
+	rollbackToHasDeadline bool
+	rollbackToVersions    []string
+	rollbackToErr         error
+	rollbackVersions      []service.RollbackVersion
+	rollbackVersionsErr   error
+	rollbackVersionsCall  int
+	channel               string
+	setChannelErr         error
+	getChannelErr         error
+	setChannelCalls       []string
 }
 
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
