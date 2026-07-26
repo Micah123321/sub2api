@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { createId } from '../common/ids';
-import { parseMajorToMinor } from '../common/money';
+import { parseRemoteAmountToMicro, parseRemoteBalanceToMinor } from '../common/money';
 import {
   MainServiceClient,
   RemoteError,
@@ -105,7 +105,7 @@ export class SyncService {
             email: item.email || '',
             status: item.status || 'unknown',
             role: item.role || 'user',
-            balanceMinor: parseMajorToMinor(item.balance ?? 0),
+            balanceMinor: parseRemoteBalanceToMinor(item.balance ?? 0),
             currency: 'USD',
             observedAt: now,
             rawJson: JSON.stringify(item),
@@ -187,19 +187,19 @@ export class SyncService {
       const now = Date.now();
       const upsert = this.sqlite.prepare(
         `INSERT INTO remote_usage_records
-         (id, remote_record_id, main_user_id, model, tokens, amount_minor, occurred_at, observed_at, raw_json)
+         (id, remote_record_id, main_user_id, model, tokens, amount_micro, occurred_at, observed_at, raw_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(remote_record_id) DO UPDATE SET
            model=excluded.model,
            tokens=excluded.tokens,
-           amount_minor=excluded.amount_minor,
+           amount_micro=excluded.amount_micro,
            observed_at=excluded.observed_at,
            raw_json=excluded.raw_json`,
       );
       const tx = this.sqlite.transaction(() => {
         for (const item of usage.items) {
           const tokens = (item.input_tokens ?? 0) + (item.output_tokens ?? 0);
-          const amountMinor = parseMajorToMinor(item.actual_cost ?? item.total_cost ?? 0);
+          const amountMicro = parseRemoteAmountToMicro(item.actual_cost ?? item.total_cost ?? 0);
           const occurredAt = item.created_at ? Date.parse(item.created_at) || now : now;
           upsert.run(
             createId('rusage'),
@@ -207,7 +207,7 @@ export class SyncService {
             String(mainUserId),
             item.model || '',
             tokens,
-            amountMinor,
+            amountMicro,
             occurredAt,
             now,
             JSON.stringify(item),
@@ -227,7 +227,7 @@ export class SyncService {
     return this.sqlite
       .prepare(
         `SELECT id, remote_record_id as remoteRecordId, main_user_id as mainUserId,
-                model, tokens, amount_minor as amountMinor,
+                model, tokens, amount_micro as amountMicro,
                 occurred_at as occurredAt, observed_at as observedAt
          FROM remote_usage_records
          WHERE main_user_id = ?

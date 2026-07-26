@@ -69,7 +69,7 @@ export const remoteUsageRecords = sqliteTable(
     mainUserId: text('main_user_id').notNull(),
     model: text('model').notNull().default(''),
     tokens: integer('tokens').notNull().default(0),
-    amountMinor: integer('amount_minor').notNull().default(0),
+    amountMicro: integer('amount_micro').notNull().default(0),
     occurredAt: integer('occurred_at', { mode: 'timestamp_ms' }).notNull(),
     observedAt: integer('observed_at', { mode: 'timestamp_ms' }).notNull(),
     rawJson: text('raw_json'),

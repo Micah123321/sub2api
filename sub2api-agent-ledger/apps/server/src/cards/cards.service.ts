@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { createId } from '../common/ids';
 import { displayCardMask, hashCardCode } from '../common/crypto';
@@ -281,6 +281,3 @@ function mapCard(row: Record<string, unknown>): CardRecord {
     createdAt: Number(row.created_at),
   };
 }
-
-// keep createHash import used for potential future salt strategies
-void createHash;

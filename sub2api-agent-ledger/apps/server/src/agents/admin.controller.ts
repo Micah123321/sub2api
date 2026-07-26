@@ -11,7 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { AuthGuard, assertAgentAccess } from '../auth/auth.guard';
+import { AuthGuard } from '../auth/auth.guard';
 import { AuthService } from '../auth/auth.service';
 import type { SessionUser } from '../auth/auth.types';
 import { AUTH_SERVICE, AGENTS_SERVICE, ASSIGNMENTS_SERVICE, AUDIT_SERVICE, CARDS_SERVICE, LEDGER_SERVICE, SYNC_SERVICE } from '../app.tokens';
@@ -465,6 +465,3 @@ export class AdminController {
     );
   }
 }
-
-// keep assertAgentAccess import for shared modules
-void assertAgentAccess;

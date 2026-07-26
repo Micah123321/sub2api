@@ -18,11 +18,13 @@ const selectedCount = computed(() => selectedIds.value.length);
 
 async function loadAgents() {
   const result = await api.agents();
-  if (result.code === 'OK') {
-    agents.value = (result.data as any[]) || [];
-    if (!selectedAgentId.value && agents.value[0]) {
-      selectedAgentId.value = agents.value[0].id;
-    }
+  if (result.code !== 'OK') {
+    error.value = result.message;
+    return;
+  }
+  agents.value = (result.data as any[]) || [];
+  if (!selectedAgentId.value && agents.value[0]) {
+    selectedAgentId.value = agents.value[0].id;
   }
 }
 
@@ -36,14 +38,7 @@ async function loadUsers(refresh = false) {
     return;
   }
   const data = result.data as any;
-  users.value = data.users || data.users === undefined && data.synced != null
-    ? (data.users || [])
-    : (data.users || []);
-  if (Array.isArray(data.users)) {
-    users.value = data.users;
-  } else if (Array.isArray(data)) {
-    users.value = data;
-  }
+  users.value = Array.isArray(data?.users) ? data.users : [];
 }
 
 function toggle(id: string) {
@@ -61,6 +56,15 @@ async function bind() {
   }
   message.value = '';
   error.value = '';
+  // transfer 会把用户从原代理商名下夺走，属于影响他人账本归属的操作，先确认。
+  if (
+    transfer.value &&
+    !window.confirm(
+      `确认转移 ${selectedIds.value.length} 个用户？已绑定到其他代理商的用户将被解绑并改绑到当前代理商。`,
+    )
+  ) {
+    return;
+  }
   const result = await api.batchAssign({
     agentId: selectedAgentId.value,
     mainUserIds: selectedIds.value,

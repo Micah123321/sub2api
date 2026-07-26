@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { api } from '../../api/client';
-import { formatMoney, formatTime } from '../../types';
+import { formatMoney, formatTime, formatUsageMoney } from '../../types';
 
 const users = ref<any[]>([]);
 const wallet = ref<any>(null);
@@ -162,7 +162,7 @@ onMounted(load);
               <td class="mono">{{ formatTime(item.occurredAt) }}</td>
               <td>{{ item.model }}</td>
               <td class="mono">{{ item.tokens }}</td>
-              <td class="mono">{{ formatMoney(item.amountMinor) }}</td>
+              <td class="mono">{{ formatUsageMoney(item.amountMicro) }}</td>
             </tr>
           </tbody>
         </table>

@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS remote_usage_records (
   main_user_id TEXT NOT NULL,
   model TEXT NOT NULL DEFAULT '',
   tokens INTEGER NOT NULL DEFAULT 0,
-  amount_minor INTEGER NOT NULL DEFAULT 0,
+  amount_micro INTEGER NOT NULL DEFAULT 0,
   occurred_at INTEGER NOT NULL,
   observed_at INTEGER NOT NULL,
   raw_json TEXT
@@ -180,17 +180,63 @@ CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
 `;
 
 export const MIGRATION_ID = '0001_init';
+export const MIGRATION_USAGE_MICRO_ID = '0002_usage_amount_micro';
+
+// remote_usage_records 是主服务用量的只读缓存，重建后会由下一次同步重新拉取，
+// 因此这里直接重建表而不是转换旧值：旧列存的是「分」，小额用量已被舍入成 0，
+// 原地乘以 10000 只会把错误数据放大，无法恢复精度。
+function migrateUsageAmountToMicro(sqlite: Database.Database): boolean {
+  const columns = sqlite
+    .prepare(`PRAGMA table_info(remote_usage_records)`)
+    .all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'amount_minor')) {
+    return false;
+  }
+  sqlite.exec(`
+    DROP TABLE remote_usage_records;
+    CREATE TABLE remote_usage_records (
+      id TEXT PRIMARY KEY,
+      remote_record_id TEXT NOT NULL,
+      main_user_id TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '',
+      tokens INTEGER NOT NULL DEFAULT 0,
+      amount_micro INTEGER NOT NULL DEFAULT 0,
+      occurred_at INTEGER NOT NULL,
+      observed_at INTEGER NOT NULL,
+      raw_json TEXT
+    );
+    CREATE UNIQUE INDEX remote_usage_records_remote_id_uq ON remote_usage_records(remote_record_id);
+    CREATE INDEX remote_usage_records_user_idx ON remote_usage_records(main_user_id);
+  `);
+  return true;
+}
 
 export function runMigrations(sqlite: Database.Database): { applied: string[] } {
   sqlite.exec(MIGRATION_SQL);
-  const existing = sqlite
+  const applied: string[] = [];
+
+  const hasInit = sqlite
     .prepare('SELECT id FROM schema_migrations WHERE id = ?')
     .get(MIGRATION_ID) as { id: string } | undefined;
-  if (!existing) {
+  if (!hasInit) {
     sqlite
       .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
       .run(MIGRATION_ID, Date.now());
-    return { applied: [MIGRATION_ID] };
+    applied.push(MIGRATION_ID);
   }
-  return { applied: [] };
+
+  const hasUsageMicro = sqlite
+    .prepare('SELECT id FROM schema_migrations WHERE id = ?')
+    .get(MIGRATION_USAGE_MICRO_ID) as { id: string } | undefined;
+  if (!hasUsageMicro) {
+    sqlite.transaction(() => {
+      migrateUsageAmountToMicro(sqlite);
+      sqlite
+        .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(MIGRATION_USAGE_MICRO_ID, Date.now());
+    })();
+    applied.push(MIGRATION_USAGE_MICRO_ID);
+  }
+
+  return { applied };
 }

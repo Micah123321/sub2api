@@ -67,6 +67,11 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  {
+    // 无匹配路由时回落到首页重定向，避免渲染出只有侧栏的空白页。
+    path: '/:pathMatch(.*)*',
+    redirect: '/',
+  },
 ];
 
 export const router = createRouter({
@@ -92,8 +97,9 @@ router.beforeEach(async (to) => {
     return '/agent';
   }
   if (to.meta.role === 'AGENT' && session.isAdmin) {
-    // admin can open agent pages only via explicit future path; keep simple
-    return true;
+    // 管理员没有 agentId，调 /api/agent/* 必然 403，页面只剩报错。
+    // 代理商视角需要显式的 agentId 选择器，未实现前直接送回管理端。
+    return '/admin';
   }
   if (to.meta.role === 'AGENT' && !session.isAgent && !session.isAdmin) {
     return '/login';

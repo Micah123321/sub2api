@@ -48,8 +48,18 @@ export const useSessionStore = defineStore('session', {
       }
     },
     async logout() {
-      await api.logout();
+      // 即使登出请求失败（网络断开等），本地会话也必须清空，
+      // 否则按钮点了没反应、用户停在已失效的界面上。
+      try {
+        await api.logout();
+      } finally {
+        this.user = null;
+      }
+    },
+    /** 由 API 层在收到 401 时调用，清空本地会话状态。 */
+    clearSession() {
       this.user = null;
+      this.loaded = true;
     },
   },
 });

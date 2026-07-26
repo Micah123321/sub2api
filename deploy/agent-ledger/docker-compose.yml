@@ -3,11 +3,12 @@
 # =============================================================================
 # 独立部署插件，不修改主服务 compose。主服务通过 HTTP 只读访问。
 #
-# 用法（在仓库根目录）:
-#   1. cp deploy/agent-ledger/.env.example deploy/agent-ledger/.env
-#   2. 编辑 .env（至少 SESSION_SECRET / PLUGIN_MASTER_KEY / BOOTSTRAP_ADMIN_PASSWORD）
-#   3. docker compose -f deploy/agent-ledger/docker-compose.yml --env-file deploy/agent-ledger/.env up -d --build
-#   4. 访问 http://localhost:4173
+# 用法:
+#   1. git clone https://github.com/Micah123321/sub2api.git && cd sub2api
+#   2. cp deploy/agent-ledger/.env.example deploy/agent-ledger/.env
+#   3. 编辑 .env（至少 SESSION_SECRET / PLUGIN_MASTER_KEY / BOOTSTRAP_ADMIN_PASSWORD）
+#   4. docker compose -f deploy/agent-ledger/docker-compose.yml --env-file deploy/agent-ledger/.env up -d --build
+#   5. 访问 http://localhost:4173
 #
 # 连接本机主服务时，MAIN_SERVICE_BASE_URL 可用:
 #   http://host.docker.internal:8080

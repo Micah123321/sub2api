@@ -26,7 +26,7 @@ async function submit() {
     <section class="intro-panel">
       <p class="eyebrow">AGENT LEDGER</p>
       <h1>登录账本工作台</h1>
-      <p class="intro-copy">独立插件登录。不会向浏览器暴露主服务 Admin API Key。</p>
+      <p class="intro-copy">管理代理商账本、余额与卡密。</p>
       <form class="form-grid" style="margin-top:24px" @submit.prevent="submit">
         <label>
           用户名

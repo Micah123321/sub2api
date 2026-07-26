@@ -32,7 +32,6 @@ import { AgentsService } from './agents/agents.service';
 import { AssignmentsService } from './assignments/assignments.service';
 import { CardsService } from './cards/cards.service';
 import { resolveMasterKey } from './common/crypto';
-import { hashPassword } from './auth/password';
 
 const { sqlite, db } = openDatabase();
 runMigrations(sqlite);
@@ -115,6 +114,3 @@ export class AppModule {
   static sqlite: Database.Database = sqlite;
   static db = db;
 }
-
-// silence unused hashPassword if bootstrap path changes
-void hashPassword;

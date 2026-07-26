@@ -25,7 +25,14 @@ COPY sub2api-agent-ledger/package.json \
      ./
 RUN pnpm install --frozen-lockfile
 
-COPY sub2api-agent-ledger/ ./
+# 构建上下文是仓库根目录，只有根 .dockerignore 生效，且其 `node_modules/` 只匹配顶层。
+# 因此必须逐项拷贝构建输入：`COPY sub2api-agent-ledger/ ./` 会用宿主机（Windows）的
+# node_modules 覆盖上面装好的 Linux 依赖，并把 data/ 里的开发数据库打进镜像。
+COPY sub2api-agent-ledger/apps ./apps
+COPY sub2api-agent-ledger/tsconfig.server.json \
+     sub2api-agent-ledger/tsconfig.web.json \
+     sub2api-agent-ledger/vite.config.ts \
+     ./
 RUN pnpm build \
   && pnpm prune --prod
 

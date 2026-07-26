@@ -1,0 +1,43 @@
+# =============================================================================
+# 构建上下文过滤 — 仅用于 deploy/agent-ledger/Dockerfile
+# =============================================================================
+# BuildKit 会优先使用与 Dockerfile 同名的 <dockerfile>.dockerignore，
+# 因此这里可以只收敛插件的构建上下文，不必修改主服务的根 .dockerignore。
+#
+# 该插件的构建上下文是仓库根目录。根 .dockerignore 的 `node_modules/` 只匹配顶层，
+# 不排除 frontend/ 和插件目录下的依赖，若不过滤会多传约 1.1 GB 上下文。
+#
+# 这里只用"排除"规则、不使用 `!` 反选：反选与被排除父目录的交互在
+# 经典 builder 与 BuildKit 上行为不一致，容易误伤构建输入。
+# 镜像正确性不依赖本文件（Dockerfile 已逐项 COPY 构建输入），本文件只压缩上下文体积。
+# =============================================================================
+
+# 主服务的重量级目录（插件构建完全用不到）
+frontend/node_modules
+frontend/dist
+backend/vendor
+node_modules
+docs
+output
+assets
+.git
+.github
+.helloagents
+.playwright-cli
+.vite
+openspec
+skills
+tools
+
+# 插件本地产物：必须在容器内重新安装/构建
+sub2api-agent-ledger/node_modules
+sub2api-agent-ledger/dist
+sub2api-agent-ledger/data
+sub2api-agent-ledger/coverage
+sub2api-agent-ledger/.helloagents
+sub2api-agent-ledger/spec
+
+# 密钥与本地日志
+**/.env
+**/.env.*
+**/*.log

@@ -13,11 +13,12 @@
 
 ## 快速开始
 
-在**仓库根目录**执行：
-
 ```bash
+git clone https://github.com/Micah123321/sub2api.git
+cd sub2api
+
 cp deploy/agent-ledger/.env.example deploy/agent-ledger/.env
-# 编辑 deploy/agent-ledger/.env
+# 编辑 deploy/agent-ledger/.env（至少 SESSION_SECRET / PLUGIN_MASTER_KEY / BOOTSTRAP_ADMIN_PASSWORD）
 
 docker compose \
   -f deploy/agent-ledger/docker-compose.yml \

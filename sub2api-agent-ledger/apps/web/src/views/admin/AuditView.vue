@@ -5,14 +5,19 @@ import { formatTime } from '../../types';
 
 const logs = ref<any[]>([]);
 const error = ref('');
+const loading = ref(true);
 
 onMounted(async () => {
-  const result = await api.auditLogs();
-  if (result.code !== 'OK') {
-    error.value = result.message;
-    return;
+  try {
+    const result = await api.auditLogs();
+    if (result.code !== 'OK') {
+      error.value = result.message;
+      return;
+    }
+    logs.value = (result.data as any[]) || [];
+  } finally {
+    loading.value = false;
   }
-  logs.value = (result.data as any[]) || [];
 });
 </script>
 
@@ -21,6 +26,7 @@ onMounted(async () => {
     <h1 class="page-title">审计日志</h1>
     <section class="panel">
       <p v-if="error" class="error">{{ error }}</p>
+      <div v-else-if="loading" class="empty">加载中…</div>
       <div v-else-if="!logs.length" class="empty">暂无审计记录</div>
       <div v-else class="table-wrap">
         <table>

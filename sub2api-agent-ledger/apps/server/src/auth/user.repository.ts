@@ -58,15 +58,6 @@ export class UserRepository {
     return this.findById(id)!;
   }
 
-  ensureBootstrapAdmin(username: string, password: string): AuthUser | null {
-    const existing = this.findByUsername(username);
-    if (existing) {
-      return null;
-    }
-    // sync bootstrap uses async hash via deasync-like pattern: call site awaits createUser
-    return null;
-  }
-
   listByRole(role: AuthRole): AuthUser[] {
     const rows = this.sqlite
       .prepare('SELECT * FROM plugin_users WHERE role = ? ORDER BY username ASC')

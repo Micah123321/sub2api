@@ -37,6 +37,13 @@ async function createAgent() {
 
 async function toggle(agent: any) {
   const next = agent.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  // 禁用代理商会连带禁用其登录账号，代理商会立刻被踢出，必须先确认。
+  if (
+    next === 'DISABLED' &&
+    !window.confirm(`确认禁用代理商「${agent.name}」？其登录账号将同时被禁用，无法再登录。`)
+  ) {
+    return;
+  }
   const result = await api.patchAgent(agent.id, next);
   if (result.code !== 'OK') {
     error.value = result.message;
@@ -92,7 +99,11 @@ onMounted(load);
                 <span class="mono"> {{ formatMoney(agent.walletBalanceMinor) }}</span>
               </td>
               <td>
-                <button class="secondary" type="button" @click="toggle(agent)">
+                <button
+                  :class="agent.status === 'ACTIVE' ? 'danger' : 'secondary'"
+                  type="button"
+                  @click="toggle(agent)"
+                >
                   {{ agent.status === 'ACTIVE' ? '禁用' : '恢复' }}
                 </button>
               </td>

@@ -12,36 +12,62 @@ const batches = ref<any[]>([]);
 const plaintext = ref<any[]>([]);
 const error = ref('');
 const message = ref('');
+const loading = ref(true);
+const submitting = ref(false);
 
 async function load() {
-  const agentResult = await api.agents();
-  if (agentResult.code === 'OK') {
+  loading.value = true;
+  error.value = '';
+  try {
+    const agentResult = await api.agents();
+    if (agentResult.code !== 'OK') {
+      error.value = agentResult.message;
+      return;
+    }
     agents.value = (agentResult.data as any[]) || [];
     if (!agentId.value && agents.value[0]) agentId.value = agents.value[0].id;
-  }
-  const result = await api.cards(agentId.value || undefined);
-  if (result.code === 'OK') {
+
+    const result = await api.cards(agentId.value || undefined);
+    if (result.code !== 'OK') {
+      error.value = result.message;
+      return;
+    }
     cards.value = (result.data as any)?.cards || [];
     batches.value = (result.data as any)?.batches || [];
+  } finally {
+    loading.value = false;
   }
 }
 
 async function createBatch() {
+  if (submitting.value) return;
   error.value = '';
   message.value = '';
   plaintext.value = [];
-  const result = await api.createCards({
-    agentId: agentId.value,
-    count: Number(count.value),
-    value: value.value,
-  });
-  if (result.code !== 'OK') {
-    error.value = result.message;
-    return;
+  submitting.value = true;
+  try {
+    const result = await api.createCards({
+      agentId: agentId.value,
+      count: Number(count.value),
+      value: value.value,
+    });
+    if (result.code !== 'OK') {
+      error.value = result.message;
+      return;
+    }
+    plaintext.value = (result.data as any)?.cards || [];
+    message.value = '批次已生成。明文卡密仅此时可见，请立即导出。';
+    await load();
+  } finally {
+    submitting.value = false;
   }
-  plaintext.value = (result.data as any)?.cards || [];
-  message.value = '批次已生成。明文卡密仅此时可见，请立即导出。';
-  await load();
+}
+
+/** 切换代理商时必须清空明文，否则界面上显示的是上一个代理商的卡密，容易发错。 */
+function onAgentChange() {
+  plaintext.value = [];
+  message.value = '';
+  void load();
 }
 
 function exportPlaintext() {
@@ -65,7 +91,7 @@ onMounted(load);
       <div class="grid-3">
         <label>
           代理商
-          <select v-model="agentId" @change="load">
+          <select v-model="agentId" @change="onAgentChange">
             <option v-for="agent in agents" :key="agent.id" :value="agent.id">
               {{ agent.name }}
             </option>
@@ -81,7 +107,9 @@ onMounted(load);
         </label>
       </div>
       <div class="row-actions">
-        <button type="button" @click="createBatch">生成批次</button>
+        <button type="button" :disabled="submitting" @click="createBatch">
+          {{ submitting ? '生成中…' : '生成批次' }}
+        </button>
         <button
           v-if="plaintext.length"
           class="secondary"
@@ -115,7 +143,8 @@ onMounted(load);
 
     <section class="panel">
       <h2 class="section-title">批次</h2>
-      <div v-if="!batches.length" class="empty">暂无批次</div>
+      <div v-if="loading" class="empty">加载中…</div>
+      <div v-else-if="!batches.length" class="empty">暂无批次</div>
       <div v-else class="table-wrap">
         <table>
           <thead>
@@ -140,7 +169,8 @@ onMounted(load);
 
     <section class="panel">
       <h2 class="section-title">卡密状态</h2>
-      <div v-if="!cards.length" class="empty">暂无卡密</div>
+      <div v-if="loading" class="empty">加载中…</div>
+      <div v-else-if="!cards.length" class="empty">暂无卡密</div>
       <div v-else class="table-wrap">
         <table>
           <thead>

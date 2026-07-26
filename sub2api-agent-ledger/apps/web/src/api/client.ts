@@ -1,5 +1,12 @@
 import type { ApiEnvelope } from '../types';
 
+/** 会话失效时由 session store 注册，用于跳回登录页。 */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers || {});
   if (init.body && !headers.has('Content-Type')) {
@@ -8,12 +15,53 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   if (!headers.has('X-Requested-With')) {
     headers.set('X-Requested-With', 'sub2api-agent-ledger');
   }
-  const response = await fetch(path, {
-    ...init,
-    headers,
-    credentials: 'include',
-  });
-  const json = (await response.json()) as ApiEnvelope<T>;
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers,
+      credentials: 'include',
+    });
+  } catch {
+    // 网络不可达/请求被中断：必须返回错误信封，否则调用方的 loading 永远不会复位。
+    return { code: 'NETWORK_ERROR', message: '无法连接服务，请检查网络后重试', requestId: '' };
+  }
+
+  // 网关 502、HTML 错误页等非 JSON 响应会让 response.json() 抛错。
+  let json: ApiEnvelope<T> | null = null;
+  try {
+    json = (await response.json()) as ApiEnvelope<T>;
+  } catch {
+    json = null;
+  }
+
+  if (response.status === 401 && path !== '/api/auth/login') {
+    onUnauthorized?.();
+    return {
+      code: 'SESSION_EXPIRED',
+      message: json?.message || '登录状态已失效，请重新登录',
+      requestId: json?.requestId ?? '',
+    };
+  }
+
+  if (!json) {
+    return {
+      code: 'PARSE_ERROR',
+      message: `服务响应异常（HTTP ${response.status}）`,
+      requestId: '',
+    };
+  }
+
+  // Nest 默认 404/500 响应体没有 code 字段，直接透出会把英文原文渲染给用户。
+  if (!json.code) {
+    return {
+      code: 'HTTP_ERROR',
+      message: response.ok ? '服务响应格式异常' : `请求失败（HTTP ${response.status}）`,
+      requestId: json.requestId ?? '',
+    };
+  }
+
   if (!response.ok && json.code === 'OK') {
     return {
       code: 'HTTP_ERROR',
