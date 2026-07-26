@@ -806,6 +806,26 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 	return r.ListWithFilters(ctx, params, "", "", "", "", 0, "", "")
 }
 
+// accountPlanTypeAliases maps a canonical plan filter value to the historical
+// values that upstream has written into credentials.plan_type for the same plan.
+// Without these, filtering by "pro" silently misses accounts imported when the
+// ID token still carried chatgptpro. Keys and values must already be in the
+// normalized form the query compares against: lowercase, no separators.
+var accountPlanTypeAliases = map[string][]string{
+	"pro": {"chatgptpro"},
+}
+
+// accountPlanTypeFilterValues returns the normalized values a plan filter matches.
+func accountPlanTypeFilterValues(planType string) []any {
+	aliases := accountPlanTypeAliases[planType]
+	values := make([]any, 0, len(aliases)+1)
+	values = append(values, planType)
+	for _, alias := range aliases {
+		values = append(values, alias)
+	}
+	return values
+}
+
 func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode, planType string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 
@@ -900,12 +920,18 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 	}
 	if planType != "" {
 		q = q.Where(dbaccount.PlatformEQ(service.PlatformOpenAI))
+		values := accountPlanTypeFilterValues(planType)
 		planTypePredicate := func(s *entsql.Selector) {
 			column := s.C(dbaccount.FieldCredentials)
 			s.Where(entsql.P(func(b *entsql.Builder) {
-				b.WriteString("LOWER(BTRIM(" + column + "->>'plan_type'))").
-					WriteOp(entsql.OpEQ).
-					Arg(planType)
+				// Upstream writes plan_type verbatim, so the same tier arrives as
+				// "chatgptpro", "chatgpt_pro" or "ChatGPT-Pro". Strip separators here
+				// so the SQL matches what the UI normalizes to (normalizePlanType).
+				b.WriteString("REGEXP_REPLACE(LOWER(BTRIM(" + column + "->>'plan_type')), '[[:space:]_-]+', '', 'g')").
+					WriteOp(entsql.OpIn).
+					Wrap(func(b *entsql.Builder) {
+						b.Args(values...)
+					})
 			}))
 		}
 		credentialPlanType := dbpredicate.Account(planTypePredicate)

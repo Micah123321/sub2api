@@ -68,6 +68,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccountPlatform, AccountType } from '@/types'
+import { normalizePlanType } from '@/components/account/credentialsBuilder'
 import GrokFreeIcon from './GrokFreeIcon.vue'
 import PlatformIcon from './PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -118,9 +119,7 @@ const typeLabel = computed(() => {
   }
 })
 
-const normalizedPlanType = computed(() =>
-  (props.planType || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
-)
+const normalizedPlanType = computed(() => normalizePlanType(props.planType))
 
 const planLabel = computed(() => {
   if (!normalizedPlanType.value) return ''
@@ -129,6 +128,8 @@ const planLabel = computed(() => {
       return 'Plus'
     case 'team':
       return 'Team'
+    case 'k12':
+      return 'K12'
     case 'chatgptpro':
     case 'pro':
       return 'Pro'

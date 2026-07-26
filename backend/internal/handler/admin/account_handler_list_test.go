@@ -63,6 +63,27 @@ func TestAccountHandlerListNormalizesPlanTypeFilter(t *testing.T) {
 	require.Equal(t, "plus", adminSvc.lastListAccounts.planType)
 }
 
+// Every plan the list filter offers must survive the handler whitelist; a plan
+// selectable in the UI but rejected here returns 400 instead of a filtered list.
+func TestAccountHandlerListAcceptsEveryFilterablePlanType(t *testing.T) {
+	for _, plan := range []string{"k12", "team", "plus", "pro", "free"} {
+		t.Run(plan, func(t *testing.T) {
+			router, adminSvc := setupAccountListRouter()
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/admin/accounts?platform=openai&plan_type="+strings.ToUpper(plan),
+				nil,
+			)
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, plan, adminSvc.lastListAccounts.planType)
+		})
+	}
+}
+
 func TestAccountHandlerListRejectsInvalidPlanTypeFilter(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 

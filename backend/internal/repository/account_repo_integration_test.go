@@ -344,6 +344,26 @@ func (s *AccountRepoSuite) TestListWithFilters_PlanType() {
 		Type:        service.AccountTypeOAuth,
 		Credentials: map[string]any{"plan_type": "plus"},
 	})
+	// Legacy imports stored Pro as chatgptpro; the canonical "pro" filter must still find them.
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-pro-legacy-alias",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "ChatGPTPro"},
+	})
+	// Upstream writes plan_type verbatim, so separators appear in stored values.
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-pro-separator-alias",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "chatgpt_pro"},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-k12-separator",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "K-12"},
+	})
 
 	for _, plan := range plans {
 		accounts, page, err := s.repo.ListWithFilters(
@@ -359,16 +379,26 @@ func (s *AccountRepoSuite) TestListWithFilters_PlanType() {
 			names = append(names, account.Name)
 			s.Require().Equal(service.PlatformOpenAI, account.Platform)
 		}
-		if plan == "plus" {
+		switch plan {
+		case "plus":
 			s.Require().ElementsMatch(
 				[]string{"openai-plus", "openai-plus-parent", "openai-plus-shadow"},
 				names,
 			)
 			s.Require().Equal(int64(3), page.Total)
-			continue
+		case "pro":
+			s.Require().ElementsMatch(
+				[]string{"openai-pro", "openai-pro-legacy-alias", "openai-pro-separator-alias"},
+				names,
+			)
+			s.Require().Equal(int64(3), page.Total)
+		case "k12":
+			s.Require().ElementsMatch([]string{"openai-k12", "openai-k12-separator"}, names)
+			s.Require().Equal(int64(2), page.Total)
+		default:
+			s.Require().Equal([]string{"openai-" + plan}, names)
+			s.Require().Equal(int64(1), page.Total)
 		}
-		s.Require().Equal([]string{"openai-" + plan}, names)
-		s.Require().Equal(int64(1), page.Total)
 	}
 }
 

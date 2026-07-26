@@ -271,11 +271,20 @@ export interface PlanTypeOption {
 }
 
 /**
- * plan_type 值的友好显示标签，镜像 PlatformTypeBadge 的映射
- * （canonical 值 chatgptpro 显示为 Pro，team 显示为 Team）。未知值原样返回。
+ * plan_type 的归一化：小写并去掉分隔符，使 chatgptpro / chatgpt_pro / ChatGPT-Pro
+ * 收敛为同一个 token。PlatformTypeBadge 与账号列表的本地筛选共用此函数，避免
+ * 同一账号在徽章、下拉和筛选结果里被判成不同档位。
+ */
+export function normalizePlanType(value: string | undefined | null): string {
+  return (value || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+}
+
+/**
+ * plan_type 值的友好显示标签（OpenAI 档位子集，与 PlatformTypeBadge 共享归一化）。
+ * canonical 值 chatgptpro 显示为 Pro。未知值原样返回。
  */
 export function planTypeDisplayLabel(value: string): string {
-  switch (value.trim().toLowerCase()) {
+  switch (normalizePlanType(value)) {
     case 'plus':
       return 'Plus'
     case 'pro':
@@ -285,6 +294,8 @@ export function planTypeDisplayLabel(value: string): string {
       return 'Free'
     case 'team':
       return 'Team'
+    case 'k12':
+      return 'K12'
     default:
       return value
   }
@@ -299,30 +310,29 @@ export function readPlanType(credentials: Record<string, unknown> | undefined | 
   return typeof v === 'string' ? v : ''
 }
 
+/** 列表筛选器与编辑弹窗共用的档位预设，顺序保持一致。 */
+const PLAN_TYPE_PRESETS: ReadonlyArray<PlanTypeOption> = [
+  { value: 'k12', label: 'K12' },
+  { value: 'team', label: 'Team' },
+  { value: 'plus', label: 'Plus' },
+  { value: 'pro', label: 'Pro' },
+  { value: 'free', label: 'Free' }
+]
+
 /**
- * 构建 plan_type 下拉选项：清空 + Plus/Pro/Free 预设。
- * 若当前值是某预设的别名（如 chatgptpro↔Pro），用当前的 canonical 值占据该
- * 标签位（保留 canonical，显示友好标签，避免重复项）；若是完全预设外的值
- * （如 team 或异常值），追加为一项，避免编辑时下拉丢失原值。
+ * 构建 plan_type 下拉选项：清空 + 与列表筛选器一致的 K12/Team/Plus/Pro/Free 预设。
+ * 当前值与某预设同档时（大小写、分隔符差异或 chatgptpro 这类别名），用当前值
+ * 占据该标签位——Select 按严格相等选中，若只放小写 canonical，存量的 'K12'
+ * 会选不中而回落到占位符。完全预设外的值追加为一项，避免编辑时丢失原值。
  */
 export function buildPlanTypeOptions(current: string, clearLabel: string): PlanTypeOption[] {
   const cur = (current || '').trim()
   const curLabel = cur ? planTypeDisplayLabel(cur) : ''
-  const presets: PlanTypeOption[] = [
-    { value: 'plus', label: 'Plus' },
-    { value: 'pro', label: 'Pro' },
-    { value: 'free', label: 'Free' }
-  ]
   const opts: PlanTypeOption[] = [{ value: '', label: clearLabel }]
-  for (const p of presets) {
-    if (cur && p.value !== cur.toLowerCase() && p.label === curLabel) {
-      // 当前值是该预设的别名：用 canonical 当前值占位，标签仍显示友好名
-      opts.push({ value: cur, label: p.label })
-    } else {
-      opts.push(p)
-    }
+  for (const p of PLAN_TYPE_PRESETS) {
+    opts.push(cur && p.label === curLabel ? { value: cur, label: p.label } : p)
   }
-  if (cur && !opts.some(o => o.value.toLowerCase() === cur.toLowerCase())) {
+  if (cur && !opts.some(o => normalizePlanType(o.value) === normalizePlanType(cur))) {
     opts.push({ value: cur, label: planTypeDisplayLabel(cur) })
   }
   return opts

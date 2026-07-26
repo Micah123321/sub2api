@@ -12,6 +12,7 @@ import {
   isCustomGrokBaseUrl,
   isHeaderOverrideCapable,
   GROK_BASE_URL_PRESETS,
+  normalizePlanType,
   parseHeaderOverridesJson,
   planTypeDisplayLabel,
   readPlanType,
@@ -393,6 +394,7 @@ describe('plan_type helpers', () => {
       expect(planTypeDisplayLabel('chatgptpro')).toBe('Pro')
       expect(planTypeDisplayLabel('free')).toBe('Free')
       expect(planTypeDisplayLabel('team')).toBe('Team')
+      expect(planTypeDisplayLabel('k12')).toBe('K12')
       expect(planTypeDisplayLabel('CHATGPTPRO')).toBe('Pro')
     })
     it('returns unknown values verbatim', () => {
@@ -415,9 +417,11 @@ describe('plan_type helpers', () => {
 
   describe('buildPlanTypeOptions', () => {
     const clear = 'Clear'
-    it('returns clear + presets when current is empty', () => {
+    it('returns clear + presets matching the list filter when current is empty', () => {
       expect(buildPlanTypeOptions('', clear)).toEqual([
         { value: '', label: clear },
+        { value: 'k12', label: 'K12' },
+        { value: 'team', label: 'Team' },
         { value: 'plus', label: 'Plus' },
         { value: 'pro', label: 'Pro' },
         { value: 'free', label: 'Free' }
@@ -428,22 +432,42 @@ describe('plan_type helpers', () => {
       const pros = opts.filter(o => o.label === 'Pro')
       expect(pros).toHaveLength(1)
       expect(pros[0].value).toBe('chatgptpro')
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'chatgptpro', 'free'])
+      expect(opts.map(o => o.value)).toEqual(['', 'k12', 'team', 'plus', 'chatgptpro', 'free'])
     })
-    it('appends an unknown-but-labeled value (team) as its own option', () => {
+    it('does not duplicate team now that it is a preset', () => {
       const opts = buildPlanTypeOptions('team', clear)
-      expect(opts.find(o => o.value === 'team')).toEqual({ value: 'team', label: 'Team' })
-      // presets untouched
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'pro', 'free', 'team'])
+      expect(opts.filter(o => o.value === 'team')).toHaveLength(1)
+      expect(opts.map(o => o.value)).toEqual(['', 'k12', 'team', 'plus', 'pro', 'free'])
     })
     it('appends a fully custom value with a raw label', () => {
       const opts = buildPlanTypeOptions('weird_x', clear)
       expect(opts.at(-1)).toEqual({ value: 'weird_x', label: 'weird_x' })
     })
+    // Select matches by strict equality; emitting only the lowercase canonical
+    // would leave a stored 'K12' unselectable and fall back to the placeholder.
+    it('keeps a differently-cased or separated current value selectable', () => {
+      for (const [cur, label] of [['K12', 'K12'], ['  Plus  ', 'Plus'], ['chatgpt_pro', 'Pro']] as const) {
+        const opts = buildPlanTypeOptions(cur, clear)
+        const trimmed = cur.trim()
+        expect(opts.find(o => o.value === trimmed)).toEqual({ value: trimmed, label })
+        expect(opts.filter(o => o.label === label)).toHaveLength(1)
+        expect(opts).toHaveLength(6)
+      }
+    })
     it('does not duplicate an exact preset value', () => {
       const opts = buildPlanTypeOptions('pro', clear)
       expect(opts.filter(o => o.value === 'pro')).toHaveLength(1)
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'pro', 'free'])
+      expect(opts.map(o => o.value)).toEqual(['', 'k12', 'team', 'plus', 'pro', 'free'])
+    })
+  })
+
+  describe('normalizePlanType', () => {
+    it('collapses casing and separators so aliases converge', () => {
+      expect(normalizePlanType('chatgpt_pro')).toBe('chatgptpro')
+      expect(normalizePlanType('ChatGPT-Pro')).toBe('chatgptpro')
+      expect(normalizePlanType('  K-12 ')).toBe('k12')
+      expect(normalizePlanType(undefined)).toBe('')
+      expect(normalizePlanType(null)).toBe('')
     })
   })
 

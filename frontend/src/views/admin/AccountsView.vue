@@ -496,6 +496,7 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import { planTypeDisplayLabel } from '@/components/account/credentialsBuilder'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
@@ -1735,7 +1736,9 @@ const accountMatchesCurrentFilters = (account: Account) => {
   if (filters.type && account.type !== filters.type) return false
   if (filters.plan_type) {
     if (account.platform !== 'openai') return false
-    if (getAccountPlanType(account)?.trim().toLowerCase() !== filters.plan_type) return false
+    // 后端按档位别名匹配（pro 也命中历史值 chatgptpro）。这里用同一套标签归一化，
+    // 否则编辑一个 chatgptpro 账号后本地会误判"不再属于 Pro"并把它移出列表。
+    if (planTypeDisplayLabel(getAccountPlanType(account) ?? '') !== planTypeDisplayLabel(filters.plan_type)) return false
   }
   if (filters.status) {
     const now = Date.now()
