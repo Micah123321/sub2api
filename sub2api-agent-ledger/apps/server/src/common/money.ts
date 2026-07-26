@@ -143,8 +143,8 @@ export function computeDeltaForSet(currentMinor: number, targetMinor: number): n
 
 function isExactTwoDecimals(value: number): boolean {
   const scaled = value * MINOR_UNITS_PER_MAJOR;
-  const rounded = Math.round(scaled);
-  // 相对容差：19.99 * 100 = 1998.9999999999998，绝对误差随数值增大而增大，
-  // 固定的 Number.EPSILON 容差会把合法的两位小数金额误判为非法。
-  return Math.abs(scaled - rounded) <= 1e-9 * Math.max(1, Math.abs(scaled));
+  // 绝对容差：只用于吸收浮点乘法误差（19.99 * 100 = 1998.9999999999998）。
+  // 合法两位小数的实际误差在 1e-10 量级以下，而三位小数输入至少偏离 0.1 分，
+  // 因此 1e-6 既能放过合法值，也不会在大额时把 x.xx5 误当成两位小数。
+  return Math.abs(scaled - Math.round(scaled)) < 1e-6;
 }

@@ -13,9 +13,19 @@ const transactions = ref<any[]>([]);
 const error = ref('');
 const message = ref('');
 const submitting = ref(false);
-// 幂等键必须在「同一笔调整」内保持稳定，否则重复点击会被服务端当成两笔不同的调整入账。
-// 只有在提交成功、表单进入下一笔时才 bump，重试失败的提交复用同一个键。
-const formVersion = ref(0);
+// 幂等键必须在「同一笔调整」内保持稳定，否则重复点击会被服务端当成两笔不同的调整入账；
+// 但也不能跨笔复用：服务端的幂等冲突校验只比对 type/amount/relatedCardId，不含备注，
+// 两笔金额相同、仅备注不同的调整会被静默判为重放，第二笔真实入账就被吞掉。
+// 因此用「每笔一个随机 token，提交成功后才换新」，与表单字段无关。
+function newIdempotencyKey(): string {
+  // randomUUID 仅在安全上下文可用；本服务默认以 HTTP 暴露在局域网，
+  // 此时 crypto.randomUUID 为 undefined，必须有回退，否则每次提交都抛错。
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `ui-${crypto.randomUUID()}`;
+  }
+  return `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+const idempotencyKey = ref(newIdempotencyKey());
 
 async function loadAgents() {
   const result = await api.agents();
@@ -56,14 +66,15 @@ async function adjust() {
       operation: operation.value,
       amount: amount.value,
       notes: notes.value,
-      idempotencyKey: `ui-${agentId.value}-${operation.value}-${amount.value}-${formVersion.value}`,
+      idempotencyKey: idempotencyKey.value,
     });
     if (result.code !== 'OK') {
       error.value = result.message;
       return;
     }
     message.value = (result.data as any)?.replayed ? '幂等重放，余额未重复变更' : '余额已更新';
-    formVersion.value += 1;
+    // 本笔已成功入账，换新 token，下一笔调整不会被误判为重放。
+    idempotencyKey.value = newIdempotencyKey();
     await loadWallet();
   } finally {
     submitting.value = false;

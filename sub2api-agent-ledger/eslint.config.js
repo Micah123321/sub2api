@@ -18,6 +18,7 @@ const BROWSER_GLOBALS = {
   window: 'readonly',
   document: 'readonly',
   console: 'readonly',
+  crypto: 'readonly',
   localStorage: 'readonly',
   fetch: 'readonly',
   Blob: 'readonly',

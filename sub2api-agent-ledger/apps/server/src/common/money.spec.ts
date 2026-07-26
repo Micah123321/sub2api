@@ -33,6 +33,17 @@ describe('money', () => {
     expect(() => parseMajorToMinor(12.345)).toThrow(MoneyError);
   });
 
+  // 容差必须是绝对值而非相对值：相对容差会随金额增大而放宽，
+  // 大额时把 x.xx5 当成合法两位小数并静默截断（5000000.005 会多算 1 分）。
+  it('still rejects three-decimal input at large magnitudes', () => {
+    expect(() => parseMajorToMinor(2000000.001)).toThrow(MoneyError);
+    expect(() => parseMajorToMinor(5000000.005)).toThrow(MoneyError);
+    expect(() => parseMajorToMinor(1029797.001)).toThrow(MoneyError);
+    // 同量级的合法两位小数仍须通过。
+    expect(parseMajorToMinor(2000000.01)).toBe(200000001);
+    expect(parseMajorToMinor(5000000.99)).toBe(500000099);
+  });
+
   it('formats and adds with overflow checks', () => {
     expect(formatMinorToMajor(1234)).toBe('12.34 USD');
     expect(addMinor(100, 50)).toBe(150);

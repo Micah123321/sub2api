@@ -36,7 +36,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnve
     json = null;
   }
 
-  if (response.status === 401 && path !== '/api/auth/login') {
+  // /api/auth/me 的 401 表示「当前未登录」，是会话探测的正常结果，
+  // 由路由守卫决定去向；这里只处理已登录后中途失效的情况。
+  const isSessionProbe = path === '/api/auth/me' || path === '/api/auth/login';
+  if (response.status === 401 && !isSessionProbe) {
     onUnauthorized?.();
     return {
       code: 'SESSION_EXPIRED',
