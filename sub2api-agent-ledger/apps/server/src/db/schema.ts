@@ -138,7 +138,7 @@ export const ledgerTransactions = sqliteTable(
     id: text('id').primaryKey(),
     walletId: text('wallet_id').notNull(),
     type: text('type', {
-      enum: ['ADJUST_ADD', 'ADJUST_SUBTRACT', 'ADJUST_SET', 'CARD_REDEEM'],
+      enum: ['ADJUST_ADD', 'ADJUST_SUBTRACT', 'ADJUST_SET', 'CARD_REDEEM', 'CARD_ISSUE'],
     }).notNull(),
     amountMinor: integer('amount_minor').notNull(),
     balanceBefore: integer('balance_before').notNull(),
@@ -147,6 +147,7 @@ export const ledgerTransactions = sqliteTable(
     operatorId: text('operator_id'),
     notes: text('notes').notNull().default(''),
     relatedCardId: text('related_card_id'),
+    relatedBatchId: text('related_batch_id'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => ({
@@ -154,6 +155,7 @@ export const ledgerTransactions = sqliteTable(
       table.idempotencyKey,
     ),
     walletIdx: index('ledger_transactions_wallet_idx').on(table.walletId),
+    batchIdx: index('ledger_transactions_batch_idx').on(table.relatedBatchId),
   }),
 );
 
@@ -166,10 +168,15 @@ export const cardBatches = sqliteTable(
     valueMinor: integer('value_minor').notNull(),
     status: text('status', { enum: ['ACTIVE', 'CLOSED'] }).notNull().default('ACTIVE'),
     createdBy: text('created_by'),
+    idempotencyKey: text('idempotency_key'),
+    requestFingerprint: text('request_fingerprint'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => ({
     agentIdx: index('card_batches_agent_idx').on(table.agentId),
+    idempotencyUnique: uniqueIndex('card_batches_idempotency_uq').on(
+      table.idempotencyKey,
+    ),
   }),
 );
 

@@ -12,7 +12,8 @@ export type LedgerTxType =
   | 'ADJUST_ADD'
   | 'ADJUST_SUBTRACT'
   | 'ADJUST_SET'
-  | 'CARD_REDEEM';
+  | 'CARD_REDEEM'
+  | 'CARD_ISSUE';
 
 export type AdjustOperation = 'add' | 'subtract' | 'set';
 
@@ -35,6 +36,7 @@ export interface LedgerTransaction {
   operatorId: string | null;
   notes: string;
   relatedCardId: string | null;
+  relatedBatchId: string | null;
   createdAt: number;
 }
 
@@ -46,6 +48,7 @@ export interface AdjustWalletInput {
   operatorId?: string | null;
   notes?: string;
   relatedCardId?: string | null;
+  relatedBatchId?: string | null;
   currency?: string;
 }
 
@@ -89,6 +92,7 @@ interface TxRow {
   operator_id: string | null;
   notes: string;
   related_card_id: string | null;
+  related_batch_id: string | null;
   created_at: number;
 }
 
@@ -144,7 +148,7 @@ export class LedgerService {
         `SELECT COALESCE(SUM(
            CASE
              WHEN type IN ('ADJUST_ADD', 'CARD_REDEEM') THEN amount_minor
-             WHEN type = 'ADJUST_SUBTRACT' THEN -amount_minor
+             WHEN type IN ('ADJUST_SUBTRACT', 'CARD_ISSUE') THEN -amount_minor
              WHEN type = 'ADJUST_SET' THEN 0
              ELSE 0
            END
@@ -170,7 +174,7 @@ export class LedgerService {
         balance = tx.amount_minor;
       } else if (tx.type === 'ADJUST_ADD' || tx.type === 'CARD_REDEEM') {
         balance = addMinor(balance, tx.amount_minor);
-      } else if (tx.type === 'ADJUST_SUBTRACT') {
+      } else if (tx.type === 'ADJUST_SUBTRACT' || tx.type === 'CARD_ISSUE') {
         balance = addMinor(balance, -tx.amount_minor);
       }
     }
@@ -200,7 +204,9 @@ export class LedgerService {
             ? 'CARD_REDEEM'
             : 'ADJUST_ADD'
           : input.operation === 'subtract'
-            ? 'ADJUST_SUBTRACT'
+            ? input.relatedBatchId
+              ? 'CARD_ISSUE'
+              : 'ADJUST_SUBTRACT'
             : 'ADJUST_SET';
       const expectedAmount =
         expectedType === 'ADJUST_SET' ? input.amountMinor : Math.abs(input.amountMinor);
@@ -208,7 +214,8 @@ export class LedgerService {
         wallet.agentId !== input.agentId ||
         existing.type !== expectedType ||
         existing.amount_minor !== expectedAmount ||
-        (existing.related_card_id || null) !== (input.relatedCardId ?? null)
+        (existing.related_card_id || null) !== (input.relatedCardId ?? null) ||
+        (existing.related_batch_id || null) !== (input.relatedBatchId ?? null)
       ) {
         throw new LedgerError(
           'IDEMPOTENCY_CONFLICT',
@@ -252,7 +259,7 @@ export class LedgerService {
         type = input.relatedCardId ? 'CARD_REDEEM' : 'ADJUST_ADD';
       } else if (input.operation === 'subtract') {
         delta = -input.amountMinor;
-        type = 'ADJUST_SUBTRACT';
+        type = input.relatedBatchId ? 'CARD_ISSUE' : 'ADJUST_SUBTRACT';
       } else if (input.operation === 'set') {
         delta = computeDeltaForSet(balanceBefore, input.amountMinor);
         type = 'ADJUST_SET';
@@ -282,8 +289,8 @@ export class LedgerService {
         .prepare(
           `INSERT INTO ledger_transactions
            (id, wallet_id, type, amount_minor, balance_before, balance_after,
-            idempotency_key, operator_id, notes, related_card_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            idempotency_key, operator_id, notes, related_card_id, related_batch_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           txId,
@@ -296,6 +303,7 @@ export class LedgerService {
           input.operatorId ?? null,
           input.notes ?? '',
           input.relatedCardId ?? null,
+          input.relatedBatchId ?? null,
           now,
         );
 
@@ -352,6 +360,7 @@ function mapTx(row: TxRow): LedgerTransaction {
     operatorId: row.operator_id,
     notes: row.notes,
     relatedCardId: row.related_card_id,
+    relatedBatchId: row.related_batch_id,
     createdAt: row.created_at,
   };
 }

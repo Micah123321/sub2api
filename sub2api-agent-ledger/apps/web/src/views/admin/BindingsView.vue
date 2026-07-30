@@ -13,6 +13,7 @@ const loading = ref(false);
 const results = ref<any[]>([]);
 const error = ref('');
 const message = ref('');
+const assignments = ref<any[]>([]);
 
 const selectedCount = computed(() => selectedIds.value.length);
 
@@ -79,9 +80,26 @@ async function bind() {
   selectedIds.value = [];
 }
 
+async function loadAssignments() {
+  const result = await api.assignmentHistory();
+  if (result.code === 'OK') assignments.value = (result.data as any[]) || [];
+}
+
+async function unbind(assignment: any) {
+  if (!window.confirm(`确认解绑用户 ${assignment.mainUserId}？代理将无法继续查看该用户数据。`)) return;
+  const result = await api.unbindAssignment(assignment.id);
+  if (result.code !== 'OK') {
+    error.value = result.message;
+    return;
+  }
+  message.value = '用户已解绑';
+  await loadAssignments();
+}
+
 onMounted(async () => {
   await loadAgents();
   await loadUsers(false);
+  await loadAssignments();
 });
 </script>
 
@@ -174,6 +192,24 @@ onMounted(async () => {
               <td class="mono">{{ item.mainUserId }}</td>
               <td>{{ item.status }}</td>
               <td>{{ item.message }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="section-title">当前绑定</h2>
+      <div v-if="!assignments.filter((item) => item.status === 'ACTIVE').length" class="empty">暂无当前绑定</div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead><tr><th>用户</th><th>代理</th><th>绑定时间</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="assignment in assignments.filter((item) => item.status === 'ACTIVE')" :key="assignment.id">
+              <td class="mono">{{ assignment.mainUserId }}</td>
+              <td class="mono">{{ assignment.agentId }}</td>
+              <td class="mono">{{ formatTime(assignment.boundAt) }}</td>
+              <td><button class="danger" type="button" @click="unbind(assignment)">解绑</button></td>
             </tr>
           </tbody>
         </table>

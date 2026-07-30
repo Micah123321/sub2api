@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS ledger_transactions (
   operator_id TEXT,
   notes TEXT NOT NULL DEFAULT '',
   related_card_id TEXT,
+  related_batch_id TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_transactions_idempotency_uq ON ledger_transactions(idempotency_key);
@@ -120,6 +121,8 @@ CREATE TABLE IF NOT EXISTS card_batches (
   value_minor INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   created_by TEXT,
+  idempotency_key TEXT,
+  request_fingerprint TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS card_batches_agent_idx ON card_batches(agent_id);
@@ -181,6 +184,7 @@ CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
 
 export const MIGRATION_ID = '0001_init';
 export const MIGRATION_USAGE_MICRO_ID = '0002_usage_amount_micro';
+export const MIGRATION_PAID_CARD_ISSUE_ID = '0003_paid_card_issue';
 
 // remote_usage_records 是主服务用量的只读缓存，重建后会由下一次同步重新拉取，
 // 因此这里直接重建表而不是转换旧值：旧列存的是「分」，小额用量已被舍入成 0，
@@ -211,6 +215,30 @@ function migrateUsageAmountToMicro(sqlite: Database.Database): boolean {
   return true;
 }
 
+function addColumnIfMissing(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  }
+}
+
+function migratePaidCardIssue(sqlite: Database.Database): void {
+  addColumnIfMissing(sqlite, 'ledger_transactions', 'related_batch_id', 'related_batch_id TEXT');
+  addColumnIfMissing(sqlite, 'card_batches', 'idempotency_key', 'idempotency_key TEXT');
+  addColumnIfMissing(sqlite, 'card_batches', 'request_fingerprint', 'request_fingerprint TEXT');
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS ledger_transactions_batch_idx
+      ON ledger_transactions(related_batch_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS card_batches_idempotency_uq
+      ON card_batches(idempotency_key) WHERE idempotency_key IS NOT NULL;
+  `);
+}
+
 export function runMigrations(sqlite: Database.Database): { applied: string[] } {
   sqlite.exec(MIGRATION_SQL);
   const applied: string[] = [];
@@ -236,6 +264,19 @@ export function runMigrations(sqlite: Database.Database): { applied: string[] } 
         .run(MIGRATION_USAGE_MICRO_ID, Date.now());
     })();
     applied.push(MIGRATION_USAGE_MICRO_ID);
+  }
+
+  const hasPaidCardIssue = sqlite
+    .prepare('SELECT id FROM schema_migrations WHERE id = ?')
+    .get(MIGRATION_PAID_CARD_ISSUE_ID) as { id: string } | undefined;
+  if (!hasPaidCardIssue) {
+    sqlite.transaction(() => {
+      migratePaidCardIssue(sqlite);
+      sqlite
+        .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(MIGRATION_PAID_CARD_ISSUE_ID, Date.now());
+    })();
+    applied.push(MIGRATION_PAID_CARD_ISSUE_ID);
   }
 
   return { applied };

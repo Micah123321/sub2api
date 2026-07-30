@@ -89,10 +89,17 @@ describe('integration: remote client and security', () => {
     const cards = new CardsService(sqlite, ledger);
     const audit = new AuditService(sqlite);
 
-    const batch = cards.createBatch({
+    ledger.adjust({
+      agentId: 'agent-x',
+      operation: 'add',
+      amountMinor: 1500,
+      idempotencyKey: 'seed-agent-x',
+    });
+    const batch = cards.issueBatch({
       agentId: 'agent-x',
       count: 1,
       valueMinor: 1500,
+      idempotencyKey: 'issue-agent-x',
     });
     const code = batch.cards[0].code;
     const first = cards.redeem({ code, agentId: 'agent-x', operatorId: 'op' });
@@ -119,6 +126,59 @@ describe('integration: remote client and security', () => {
     const logs = audit.list(1);
     expect(String(logs[0].payloadJson)).toContain('[REDACTED]');
     expect(String(logs[0].payloadJson)).not.toContain('abc');
+  });
+
+  it('issues cards from the local wallet atomically and replays idempotently', () => {
+    const sqlite = new Database(':memory:');
+    runMigrations(sqlite);
+    const ledger = new LedgerService(sqlite);
+    const cards = new CardsService(sqlite, ledger);
+    ledger.adjust({
+      agentId: 'agent-issue',
+      operation: 'add',
+      amountMinor: 5_000,
+      idempotencyKey: 'seed-agent-issue',
+    });
+
+    const created = cards.issueBatch({
+      agentId: 'agent-issue',
+      count: 2,
+      valueMinor: 1_000,
+      idempotencyKey: 'issue-1',
+    });
+    expect(created.replayed).toBe(false);
+    expect(created.cards).toHaveLength(2);
+    expect(created.wallet?.balanceMinor).toBe(3_000);
+    expect(created.transaction.type).toBe('CARD_ISSUE');
+
+    const replayed = cards.issueBatch({
+      agentId: 'agent-issue',
+      count: 2,
+      valueMinor: 1_000,
+      idempotencyKey: 'issue-1',
+    });
+    expect(replayed.replayed).toBe(true);
+    expect(replayed.cards).toHaveLength(0);
+    expect(replayed.wallet?.balanceMinor).toBe(3_000);
+
+    expect(() =>
+      cards.issueBatch({
+        agentId: 'agent-issue',
+        count: 3,
+        valueMinor: 1_000,
+        idempotencyKey: 'issue-1',
+      }),
+    ).toThrow('幂等键');
+    expect(() =>
+      cards.issueBatch({
+        agentId: 'agent-issue',
+        count: 10,
+        valueMinor: 1_000,
+        idempotencyKey: 'insufficient',
+      }),
+    ).toThrow('余额不足');
+    expect(cards.listBatches('agent-issue')).toHaveLength(1);
+    expect(ledger.getWalletByAgent('agent-issue')?.balanceMinor).toBe(3_000);
   });
 
   it('enforces agent scope helper', () => {

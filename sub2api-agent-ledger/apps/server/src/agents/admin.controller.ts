@@ -339,6 +339,7 @@ export class AdminController {
       count?: number;
       value?: number | string;
       valueMinor?: number;
+      idempotencyKey?: string;
     },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
@@ -348,13 +349,17 @@ export class AdminController {
       if (!body.agentId) {
         throw new Error('agentId 必填');
       }
+      if (!body.idempotencyKey?.trim()) {
+        throw new Error('idempotencyKey 必填');
+      }
       const valueMinor =
         body.valueMinor != null ? body.valueMinor : parseMajorToMinor(body.value ?? 0);
-      const result = this.cards.createBatch({
+      const result = this.cards.issueBatch({
         agentId: body.agentId,
         count: body.count ?? 0,
         valueMinor,
         createdBy: request.auth?.userId,
+        idempotencyKey: body.idempotencyKey,
       });
       this.audit.write({
         actorId: request.auth?.userId,
@@ -366,6 +371,8 @@ export class AdminController {
           agentId: body.agentId,
           count: result.batch.count,
           valueMinor: result.batch.valueMinor,
+          balanceAfter: result.wallet?.balanceMinor,
+          replayed: result.replayed,
         },
         requestId,
       });

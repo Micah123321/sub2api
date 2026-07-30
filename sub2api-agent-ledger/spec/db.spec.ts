@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   runMigrations,
   MIGRATION_ID,
+  MIGRATION_PAID_CARD_ISSUE_ID,
   MIGRATION_USAGE_MICRO_ID,
 } from '../apps/server/src/db/migrate';
 
@@ -10,7 +11,11 @@ describe('sqlite migrations', () => {
   it('creates required tables and is idempotent', () => {
     const sqlite = new Database(':memory:');
     const first = runMigrations(sqlite);
-    expect(first.applied).toEqual([MIGRATION_ID, MIGRATION_USAGE_MICRO_ID]);
+    expect(first.applied).toEqual([
+      MIGRATION_ID,
+      MIGRATION_USAGE_MICRO_ID,
+      MIGRATION_PAID_CARD_ISSUE_ID,
+    ]);
     const second = runMigrations(sqlite);
     expect(second.applied).toEqual([]);
 
@@ -41,6 +46,8 @@ describe('sqlite migrations', () => {
         'cards_code_hash_uq',
         'agent_user_assignments_active_uq',
         'remote_users_main_user_uq',
+        'card_batches_idempotency_uq',
+        'ledger_transactions_batch_idx',
       ]),
     );
   });
@@ -63,19 +70,44 @@ describe('sqlite migrations', () => {
       );
       CREATE UNIQUE INDEX remote_usage_records_remote_id_uq ON remote_usage_records(remote_record_id);
       CREATE INDEX remote_usage_records_user_idx ON remote_usage_records(main_user_id);
+      CREATE TABLE ledger_transactions (
+        id TEXT PRIMARY KEY, wallet_id TEXT NOT NULL, type TEXT NOT NULL,
+        amount_minor INTEGER NOT NULL, balance_before INTEGER NOT NULL,
+        balance_after INTEGER NOT NULL, idempotency_key TEXT NOT NULL,
+        operator_id TEXT, notes TEXT NOT NULL DEFAULT '', related_card_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE card_batches (
+        id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, count INTEGER NOT NULL,
+        value_minor INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE',
+        created_by TEXT, created_at INTEGER NOT NULL
+      );
     `);
     sqlite
       .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
       .run(MIGRATION_ID, Date.now());
 
     const applied = runMigrations(sqlite);
-    expect(applied.applied).toEqual([MIGRATION_USAGE_MICRO_ID]);
+    expect(applied.applied).toEqual([
+      MIGRATION_USAGE_MICRO_ID,
+      MIGRATION_PAID_CARD_ISSUE_ID,
+    ]);
 
     const columns = (
       sqlite.prepare(`PRAGMA table_info(remote_usage_records)`).all() as Array<{ name: string }>
     ).map((column) => column.name);
     expect(columns).toContain('amount_micro');
     expect(columns).not.toContain('amount_minor');
+
+    const batchColumns = (
+      sqlite.prepare(`PRAGMA table_info(card_batches)`).all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(batchColumns).toEqual(expect.arrayContaining(['idempotency_key', 'request_fingerprint']));
+
+    const ledgerColumns = (
+      sqlite.prepare(`PRAGMA table_info(ledger_transactions)`).all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(ledgerColumns).toContain('related_batch_id');
 
     // 重建后唯一索引必须仍然存在，否则同步的 ON CONFLICT 会退化成重复插入。
     const indexes = (

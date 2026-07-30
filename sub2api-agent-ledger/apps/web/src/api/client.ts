@@ -143,6 +143,12 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
+  assignmentHistory() {
+    return request('/api/admin/assignments/history');
+  },
+  unbindAssignment(id: string) {
+    return request(`/api/admin/assignments/${id}/unbind`, { method: 'POST' });
+  },
   wallet(agentId: string) {
     return request(`/api/admin/wallets/${agentId}`);
   },
@@ -163,7 +169,7 @@ export const api = {
   walletLedger(agentId: string) {
     return request(`/api/admin/wallets/${agentId}/ledger`);
   },
-  createCards(body: { agentId: string; count: number; value: number | string }) {
+  createCards(body: { agentId: string; count: number; value: number | string; idempotencyKey: string }) {
     return request('/api/admin/cards/batches', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -172,6 +178,9 @@ export const api = {
   cards(agentId?: string) {
     const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
     return request(`/api/admin/cards${query}`);
+  },
+  revokeCard(id: string) {
+    return request(`/api/admin/cards/${id}/revoke`, { method: 'POST' });
   },
   auditLogs() {
     return request('/api/admin/audit-logs');
@@ -190,6 +199,12 @@ export const api = {
     return request('/api/agent/cards/redeem', {
       method: 'POST',
       body: JSON.stringify({ code, idempotencyKey }),
+    });
+  },
+  issueAgentCards(body: { count: number; valueMinor: number; idempotencyKey: string }) {
+    return request('/api/agent/cards/batches', {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   },
 };

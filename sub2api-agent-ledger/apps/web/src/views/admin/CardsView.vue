@@ -15,6 +15,10 @@ const message = ref('');
 const loading = ref(true);
 const submitting = ref(false);
 
+function createIdempotencyKey() {
+  return `admin-card-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
@@ -50,6 +54,7 @@ async function createBatch() {
       agentId: agentId.value,
       count: Number(count.value),
       value: value.value,
+      idempotencyKey: createIdempotencyKey(),
     });
     if (result.code !== 'OK') {
       error.value = result.message;
@@ -61,6 +66,17 @@ async function createBatch() {
   } finally {
     submitting.value = false;
   }
+}
+
+async function revoke(card: any) {
+  if (!window.confirm(`确认作废卡密 ${card.displayMask}？作废不会退款。`)) return;
+  const result = await api.revokeCard(card.id);
+  if (result.code !== 'OK') {
+    error.value = result.message;
+    return;
+  }
+  message.value = '卡密已作废';
+  await load();
 }
 
 /** 切换代理商时必须清空明文，否则界面上显示的是上一个代理商的卡密，容易发错。 */
@@ -179,6 +195,7 @@ onMounted(load);
               <th>状态</th>
               <th>面值</th>
               <th>核销时间</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -187,6 +204,9 @@ onMounted(load);
               <td>{{ card.status }}</td>
               <td class="mono">{{ formatMoney(card.valueMinor) }}</td>
               <td class="mono">{{ formatTime(card.redeemedAt) }}</td>
+              <td>
+                <button v-if="card.status === 'ACTIVE'" class="danger" type="button" @click="revoke(card)">作废</button>
+              </td>
             </tr>
           </tbody>
         </table>

@@ -12,6 +12,15 @@ const code = ref('');
 const error = ref('');
 const message = ref('');
 const loading = ref(false);
+const issueCount = ref(1);
+const issueValue = ref('10');
+const issuedCards = ref<any[]>([]);
+const issuing = ref(false);
+const issueKey = ref(newIdempotencyKey());
+
+function newIdempotencyKey(): string {
+  return `agent-issue-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
+}
 
 async function load() {
   loading.value = true;
@@ -59,6 +68,46 @@ async function redeem() {
   await load();
 }
 
+async function issueCards() {
+  if (issuing.value) return;
+  const valueMinor = Math.round(Number(issueValue.value) * 100);
+  if (!Number.isInteger(valueMinor) || valueMinor <= 0) {
+    error.value = '请输入有效卡密面值';
+    return;
+  }
+  issuing.value = true;
+  error.value = '';
+  message.value = '';
+  try {
+    const result = await api.issueAgentCards({
+      count: Number(issueCount.value),
+      valueMinor,
+      idempotencyKey: issueKey.value,
+    });
+    if (result.code !== 'OK') {
+      error.value = result.message;
+      return;
+    }
+    const data = result.data as any;
+    issuedCards.value = data?.cards || [];
+    message.value = data?.replayed ? '该请求已处理，未重复扣款或发卡' : '卡密已创建，请立即导出明文';
+    if (!data?.replayed) issueKey.value = newIdempotencyKey();
+    await load();
+  } finally {
+    issuing.value = false;
+  }
+}
+
+function downloadIssuedCards() {
+  const text = issuedCards.value.map((card) => card.code).join('\n');
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `agent-cards-${Date.now()}.txt`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 onMounted(load);
 </script>
 
@@ -76,6 +125,12 @@ onMounted(load);
           </label>
           <button type="submit">核销</button>
         </form>
+        <form class="form-grid" @submit.prevent="issueCards">
+          <label>卡密数量<input v-model.number="issueCount" type="number" min="1" max="500" required /></label>
+          <label>单张面值<input v-model="issueValue" class="mono" required /></label>
+          <button type="submit" :disabled="issuing">{{ issuing ? '创建中…' : '用余额创建卡密' }}</button>
+        </form>
+        <button v-if="issuedCards.length" class="secondary" type="button" @click="downloadIssuedCards">下载本次明文卡密</button>
         <p v-if="message" class="success">{{ message }}</p>
         <p v-if="error" class="error">{{ error }}</p>
       </div>

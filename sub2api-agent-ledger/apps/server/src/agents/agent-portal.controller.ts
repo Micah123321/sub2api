@@ -233,4 +233,51 @@ export class AgentPortalController {
       return fail('REDEEM_FAILED', error instanceof Error ? error.message : '核销失败', requestId);
     }
   }
+
+  @Post('cards/batches')
+  issueCards(
+    @Req() request: AuthedRequest,
+    @Body()
+    body: {
+      count?: number;
+      valueMinor?: number;
+      idempotencyKey?: string;
+    },
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const requestId = createRequestId();
+    try {
+      const session = this.requireAgent(request);
+      if (session.role !== 'AGENT') {
+        throw new Error('管理员请使用管理端发卡接口');
+      }
+      const agentId = this.resolveAgentId(session);
+      const result = this.cards.issueBatch({
+        agentId,
+        count: body.count ?? 0,
+        valueMinor: body.valueMinor ?? 0,
+        idempotencyKey: body.idempotencyKey ?? '',
+        createdBy: session.userId,
+      });
+      this.audit.write({
+        actorId: session.userId,
+        actorRole: session.role,
+        action: result.replayed ? 'cards.issue_replayed' : 'cards.issue',
+        resourceType: 'card_batch',
+        resourceId: result.batch.id,
+        payload: {
+          agentId,
+          count: result.batch.count,
+          valueMinor: result.batch.valueMinor,
+          balanceAfter: result.wallet?.balanceMinor,
+          replayed: result.replayed,
+        },
+        requestId,
+      });
+      return ok(result, requestId);
+    } catch (error) {
+      reply.status(400);
+      return fail('ISSUE_FAILED', error instanceof Error ? error.message : '创建卡密失败', requestId);
+    }
+  }
 }
