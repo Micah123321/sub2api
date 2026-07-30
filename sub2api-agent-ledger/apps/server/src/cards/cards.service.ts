@@ -144,14 +144,20 @@ export class CardsService {
   }
 
   listBatches(agentId?: string): CardBatch[] {
-    const rows = agentId
-      ? (this.sqlite
-          .prepare('SELECT * FROM card_batches WHERE agent_id = ? ORDER BY created_at DESC')
-          .all(agentId) as Array<Record<string, unknown>>)
-      : (this.sqlite
-          .prepare('SELECT * FROM card_batches ORDER BY created_at DESC')
-          .all() as Array<Record<string, unknown>>);
-    return rows.map(mapBatch);
+    return this.listBatchesPage(agentId, { page: 1, pageSize: 100 }).items;
+  }
+
+  listBatchesPage(agentId: string | undefined, request: PageRequest = {}): PageResult<CardBatch> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const where = agentId ? 'WHERE agent_id = ?' : '';
+    const params = agentId ? [agentId] : [];
+    const total = Number(
+      (this.sqlite.prepare(`SELECT COUNT(*) AS total FROM card_batches ${where}`).get(...params) as { total: number }).total,
+    );
+    const rows = this.sqlite
+      .prepare(`SELECT * FROM card_batches ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...params, pageSize, offset) as Array<Record<string, unknown>>;
+    return { items: rows.map(mapBatch), page, pageSize, total };
   }
 
   listCardsPage(

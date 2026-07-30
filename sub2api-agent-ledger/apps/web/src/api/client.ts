@@ -180,9 +180,10 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  cards(agentId?: string, page = 1, pageSize = 25) {
+  cards(agentId?: string, page = 1, pageSize = 25, batchPage = 1) {
     const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (agentId) query.set('agentId', agentId);
+    query.set('batchPage', String(batchPage));
     return request(`/api/admin/cards?${query.toString()}`);
   },
   revokeCard(id: string) {

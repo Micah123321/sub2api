@@ -15,16 +15,19 @@ const error = ref('');
 const message = ref('');
 const loading = ref(true);
 const submitting = ref(false);
-const page = ref(1);
+const cardsPage = ref(1);
+const batchesPage = ref(1);
 const pageSize = 25;
-const total = ref(0);
+const cardsTotal = ref(0);
+const batchesTotal = ref(0);
 
 function createIdempotencyKey() {
   return `admin-card-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 }
 
-async function load(nextPage = page.value) {
-  page.value = nextPage;
+async function load(nextCardsPage = cardsPage.value, nextBatchesPage = batchesPage.value) {
+  cardsPage.value = nextCardsPage;
+  batchesPage.value = nextBatchesPage;
   loading.value = true;
   error.value = '';
   try {
@@ -36,15 +39,16 @@ async function load(nextPage = page.value) {
     agents.value = (agentResult.data as any[]) || [];
     if (!agentId.value && agents.value[0]) agentId.value = agents.value[0].id;
 
-    const result = await api.cards(agentId.value || undefined, page.value, pageSize);
+    const result = await api.cards(agentId.value || undefined, cardsPage.value, pageSize, batchesPage.value);
     if (result.code !== 'OK') {
       error.value = result.message;
       return;
     }
     const data = result.data as any;
     cards.value = data?.cards?.items || [];
-    batches.value = (result.data as any)?.batches || [];
-    total.value = data?.cards?.total || 0;
+    batches.value = data?.batches?.items || [];
+    cardsTotal.value = data?.cards?.total || 0;
+    batchesTotal.value = data?.batches?.total || 0;
   } finally {
     loading.value = false;
   }
@@ -90,7 +94,7 @@ async function revoke(card: any) {
 function onAgentChange() {
   plaintext.value = [];
   message.value = '';
-  void load(1);
+  void load(1, 1);
 }
 
 function exportPlaintext() {
@@ -188,7 +192,7 @@ onMounted(load);
           </tbody>
         </table>
       </div>
-      <PaginationControls :page="page" :page-size="pageSize" :total="total" :disabled="loading" @change="load" />
+      <PaginationControls :page="batchesPage" :page-size="pageSize" :total="batchesTotal" :disabled="loading" @change="(next) => load(cardsPage, next)" />
     </section>
 
     <section class="panel">
@@ -219,6 +223,7 @@ onMounted(load);
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="cardsPage" :page-size="pageSize" :total="cardsTotal" :disabled="loading" @change="(next) => load(next, batchesPage)" />
     </section>
   </div>
 </template>

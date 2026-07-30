@@ -82,9 +82,10 @@ export class SyncService {
     const runId = this.beginRun('users');
     try {
       const client = this.client();
+      const { page, pageSize } = normalizePage(params, 25);
       const result = await client.listUsers({
-        page: params.page ?? 1,
-        pageSize: params.pageSize ?? 50,
+        page,
+        pageSize,
         search: params.search,
       });
       const now = Date.now();

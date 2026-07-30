@@ -351,11 +351,12 @@ export class AdminController {
     @Query('status') status?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('batchPage') batchPage?: string,
   ) {
     this.requireAdmin(request);
     return ok(
       {
-        batches: this.cards.listBatches(agentId),
+        batches: this.cards.listBatchesPage(agentId, { page: batchPage, pageSize }),
         cards: this.cards.listCardsPage({ agentId, batchId, status }, { page, pageSize }),
       },
       createRequestId(),
