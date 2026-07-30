@@ -119,4 +119,23 @@ describe('ledger', () => {
       }),
     ).toThrowError(expect.objectContaining({ code: 'IDEMPOTENCY_CONFLICT' }));
   });
+
+  it('returns deterministic transaction pages with totals', () => {
+    const { ledger } = createLedger();
+    for (let index = 0; index < 3; index += 1) {
+      ledger.adjust({
+        agentId: 'agent-page',
+        operation: 'add',
+        amountMinor: 100,
+        idempotencyKey: `page-${index}`,
+      });
+    }
+    const wallet = ledger.getWalletByAgent('agent-page')!;
+    const first = ledger.listTransactionsPage(wallet.id, { page: 1, pageSize: 2 });
+    const second = ledger.listTransactionsPage(wallet.id, { page: 2, pageSize: 2 });
+    expect(first).toMatchObject({ page: 1, pageSize: 2, total: 3 });
+    expect(first.items).toHaveLength(2);
+    expect(second.items).toHaveLength(1);
+    expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(3);
+  });
 });

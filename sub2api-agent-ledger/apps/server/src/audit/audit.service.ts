@@ -1,4 +1,5 @@
 import { createId } from '../common/ids';
+import { normalizePage, type PageRequest, type PageResult } from '../common/pagination';
 import type Database from 'better-sqlite3';
 
 export interface AuditWriteInput {
@@ -68,15 +69,22 @@ export class AuditService {
   }
 
   list(limit = 100): Array<Record<string, unknown>> {
-    return this.sqlite
+    return this.listPage({ page: 1, pageSize: limit }).items;
+  }
+
+  listPage(request: PageRequest = {}): PageResult<Record<string, unknown>> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number((this.sqlite.prepare('SELECT COUNT(*) AS total FROM audit_logs').get() as { total: number }).total);
+    const items = this.sqlite
       .prepare(
         `SELECT id, actor_id as actorId, actor_role as actorRole, action,
                 resource_type as resourceType, resource_id as resourceId,
                 payload_json as payloadJson, request_id as requestId, created_at as createdAt
          FROM audit_logs
-         ORDER BY created_at DESC
-         LIMIT ?`,
+         ORDER BY created_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
       )
-      .all(limit) as Array<Record<string, unknown>>;
+      .all(pageSize, offset) as Array<Record<string, unknown>>;
+    return { items, page, pageSize, total };
   }
 }

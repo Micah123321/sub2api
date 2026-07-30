@@ -2,23 +2,34 @@
 import { onMounted, ref } from 'vue';
 import { api } from '../../api/client';
 import { formatTime } from '../../types';
+import PaginationControls from '../../components/PaginationControls.vue';
 
 const logs = ref<any[]>([]);
 const error = ref('');
 const loading = ref(true);
+const page = ref(1);
+const pageSize = 25;
+const total = ref(0);
 
-onMounted(async () => {
+async function load(nextPage = page.value) {
+  page.value = nextPage;
+  loading.value = true;
+  error.value = '';
   try {
-    const result = await api.auditLogs();
+    const result = await api.auditLogs(page.value, pageSize);
     if (result.code !== 'OK') {
       error.value = result.message;
       return;
     }
-    logs.value = (result.data as any[]) || [];
+    const data = result.data as any;
+    logs.value = data?.items || [];
+    total.value = data?.total || 0;
   } finally {
     loading.value = false;
   }
-});
+}
+
+onMounted(load);
 </script>
 
 <template>
@@ -50,6 +61,7 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
+      <PaginationControls v-if="!error" :page="page" :page-size="pageSize" :total="total" :disabled="loading" @change="load" />
     </section>
   </div>
 </template>

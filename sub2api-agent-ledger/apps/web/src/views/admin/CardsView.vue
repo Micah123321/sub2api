@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { api } from '../../api/client';
 import { formatMoney, formatTime } from '../../types';
+import PaginationControls from '../../components/PaginationControls.vue';
 
 const agents = ref<any[]>([]);
 const agentId = ref('');
@@ -14,12 +15,16 @@ const error = ref('');
 const message = ref('');
 const loading = ref(true);
 const submitting = ref(false);
+const page = ref(1);
+const pageSize = 25;
+const total = ref(0);
 
 function createIdempotencyKey() {
   return `admin-card-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 }
 
-async function load() {
+async function load(nextPage = page.value) {
+  page.value = nextPage;
   loading.value = true;
   error.value = '';
   try {
@@ -31,13 +36,15 @@ async function load() {
     agents.value = (agentResult.data as any[]) || [];
     if (!agentId.value && agents.value[0]) agentId.value = agents.value[0].id;
 
-    const result = await api.cards(agentId.value || undefined);
+    const result = await api.cards(agentId.value || undefined, page.value, pageSize);
     if (result.code !== 'OK') {
       error.value = result.message;
       return;
     }
-    cards.value = (result.data as any)?.cards || [];
+    const data = result.data as any;
+    cards.value = data?.cards?.items || [];
     batches.value = (result.data as any)?.batches || [];
+    total.value = data?.cards?.total || 0;
   } finally {
     loading.value = false;
   }
@@ -83,7 +90,7 @@ async function revoke(card: any) {
 function onAgentChange() {
   plaintext.value = [];
   message.value = '';
-  void load();
+  void load(1);
 }
 
 function exportPlaintext() {
@@ -181,6 +188,7 @@ onMounted(load);
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="page" :page-size="pageSize" :total="total" :disabled="loading" @change="load" />
     </section>
 
     <section class="panel">

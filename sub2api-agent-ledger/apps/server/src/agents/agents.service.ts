@@ -3,6 +3,7 @@ import { createId } from '../common/ids';
 import { LedgerService } from '../wallet/ledger';
 import { UserRepository } from '../auth/user.repository';
 import type { AuthUser } from '../auth/auth.types';
+import { DbSessionStore } from '../auth/db-session.store';
 
 export interface AgentRecord {
   id: string;
@@ -24,6 +25,7 @@ export class AgentsService {
     private readonly sqlite: Database.Database,
     private readonly ledger: LedgerService,
     private readonly users: UserRepository,
+    private readonly sessions: DbSessionStore,
   ) {}
 
   list(): AgentSummary[] {
@@ -100,8 +102,27 @@ export class AgentsService {
       .all(id) as Array<{ id: string }>;
     for (const user of loginUsers) {
       this.users.setStatus(user.id, status === 'ACTIVE' ? 'ACTIVE' : 'DISABLED');
+      if (status === 'DISABLED') this.sessions.revokeByUser(user.id);
     }
     return this.get(id)!;
+  }
+
+  async update(id: string, input: { name?: string; notes?: string }): Promise<AgentSummary> {
+    const agent = this.get(id);
+    if (!agent) throw new Error('代理商不存在');
+    const name = input.name?.trim() || agent.name;
+    const existing = this.sqlite.prepare('SELECT id FROM agents WHERE name = ? AND id != ?').get(name, id);
+    if (existing) throw new Error('代理商名称已存在');
+    this.sqlite.prepare('UPDATE agents SET name = ?, notes = ?, updated_at = ? WHERE id = ?').run(name, input.notes?.trim() ?? agent.notes, Date.now(), id);
+    return this.get(id)!;
+  }
+
+  async resetPassword(id: string, password: string): Promise<void> {
+    if (!password || password.length < 8) throw new Error('新密码至少需要 8 个字符');
+    const login = this.users.findAgentLogin(id);
+    if (!login) throw new Error('代理登录账号不存在');
+    await this.users.updateAgentLogin(login.id, { password });
+    this.sessions.revokeByUser(login.id);
   }
 
   private toSummary(agent: AgentRecord): AgentSummary {

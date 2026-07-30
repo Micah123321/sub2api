@@ -70,6 +70,25 @@ export class UserRepository {
       .prepare('UPDATE plugin_users SET status = ?, updated_at = ? WHERE id = ?')
       .run(status, Date.now(), id);
   }
+
+  async updateAgentLogin(userId: string, input: { username?: string; password?: string }): Promise<AuthUser> {
+    const user = this.findById(userId);
+    if (!user || user.role !== 'AGENT') throw new Error('代理登录账号不存在');
+    const username = input.username?.trim();
+    if (username && username !== user.username) {
+      if (this.findByUsername(username)) throw new Error('登录用户名已存在');
+      this.sqlite.prepare('UPDATE plugin_users SET username = ?, updated_at = ? WHERE id = ?').run(username, Date.now(), userId);
+    }
+    if (input.password) {
+      this.sqlite.prepare('UPDATE plugin_users SET password_hash = ?, updated_at = ? WHERE id = ?').run(await hashPassword(input.password), Date.now(), userId);
+    }
+    return this.findById(userId)!;
+  }
+
+  findAgentLogin(agentId: string): AuthUser | null {
+    const row = this.sqlite.prepare("SELECT * FROM plugin_users WHERE agent_id = ? AND role = 'AGENT' ORDER BY created_at ASC LIMIT 1").get(agentId) as UserRow | undefined;
+    return row ? mapUser(row) : null;
+  }
 }
 
 function mapUser(row: UserRow): AuthUser {

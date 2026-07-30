@@ -62,6 +62,10 @@ export class DbSessionStore {
       .run(hashToken(token));
     return result.changes > 0;
   }
+
+  revokeByUser(userId: string): number {
+    return this.sqlite.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
+  }
 }
 
 function hashToken(token: string): string {

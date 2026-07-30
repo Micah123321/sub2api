@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { api } from '../../api/client';
 import { formatMoney, formatTime, formatUsageMoney } from '../../types';
+import PaginationControls from '../../components/PaginationControls.vue';
 
 const users = ref<any[]>([]);
 const wallet = ref<any>(null);
@@ -17,17 +18,26 @@ const issueValue = ref('10');
 const issuedCards = ref<any[]>([]);
 const issuing = ref(false);
 const issueKey = ref(newIdempotencyKey());
+const usersPage = ref(1);
+const walletPage = ref(1);
+const pageSize = 25;
+const usersTotal = ref(0);
+const walletTotal = ref(0);
+const usagePage = ref(1);
+const usageTotal = ref(0);
 
 function newIdempotencyKey(): string {
   return `agent-issue-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`;
 }
 
-async function load() {
+async function load(nextUsersPage = usersPage.value, nextWalletPage = walletPage.value) {
+  usersPage.value = nextUsersPage;
+  walletPage.value = nextWalletPage;
   loading.value = true;
   error.value = '';
   const [usersResult, walletResult] = await Promise.all([
-    api.agentUsers(),
-    api.agentWallet(),
+    api.agentUsers(usersPage.value, pageSize),
+    api.agentWallet(walletPage.value, pageSize),
   ]);
   loading.value = false;
   if (usersResult.code !== 'OK') {
@@ -38,21 +48,28 @@ async function load() {
     error.value = walletResult.message;
     return;
   }
-  users.value = (usersResult.data as any)?.users || [];
-  wallet.value = (walletResult.data as any)?.wallet;
-  transactions.value = (walletResult.data as any)?.transactions || [];
+  const usersData = usersResult.data as any;
+  const walletData = walletResult.data as any;
+  users.value = usersData?.users || [];
+  usersTotal.value = usersData?.page?.total || 0;
+  wallet.value = walletData?.wallet;
+  transactions.value = walletData?.transactions?.items || [];
+  walletTotal.value = walletData?.transactions?.total || 0;
 }
 
-async function openUser(user: any) {
+async function openUser(user: any, nextPage = 1, refresh = true) {
   selected.value = null;
   usage.value = [];
-  const result = await api.agentUser(user.mainUserId, true);
+  usagePage.value = nextPage;
+  const result = await api.agentUser(user.mainUserId, refresh, usagePage.value, pageSize);
   if (result.code !== 'OK') {
     error.value = result.message;
     return;
   }
   selected.value = result.data;
-  usage.value = (result.data as any)?.usage || [];
+  const data = result.data as any;
+  usage.value = data?.usage || [];
+  usageTotal.value = data?.page?.total || 0;
 }
 
 async function redeem() {
@@ -147,7 +164,7 @@ onMounted(load);
               </tr>
             </thead>
             <tbody>
-              <tr v-for="tx in transactions.slice(0, 8)" :key="tx.id">
+            <tr v-for="tx in transactions" :key="tx.id">
                 <td class="mono">{{ formatTime(tx.createdAt) }}</td>
                 <td>{{ tx.type }}</td>
                 <td class="mono">{{ formatMoney(tx.balanceAfter) }}</td>
@@ -155,6 +172,7 @@ onMounted(load);
             </tbody>
           </table>
         </div>
+        <PaginationControls :page="walletPage" :page-size="pageSize" :total="walletTotal" @change="(next) => load(usersPage, next)" />
       </div>
     </section>
 
@@ -192,6 +210,7 @@ onMounted(load);
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="usersPage" :page-size="pageSize" :total="usersTotal" :disabled="loading" @change="(next) => load(next, walletPage)" />
     </section>
 
     <section v-if="selected" class="panel" style="margin-top:16px">
@@ -222,6 +241,7 @@ onMounted(load);
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="usagePage" :page-size="pageSize" :total="usageTotal" @change="(next) => openUser(selected.assignment, next, false)" />
     </section>
   </div>
 </template>

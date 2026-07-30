@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { api } from '../../api/client';
 import { formatMoney, formatTime } from '../../types';
+import PaginationControls from '../../components/PaginationControls.vue';
 
 const agents = ref<any[]>([]);
 const users = ref<any[]>([]);
@@ -14,6 +15,11 @@ const results = ref<any[]>([]);
 const error = ref('');
 const message = ref('');
 const assignments = ref<any[]>([]);
+const usersPage = ref(1);
+const assignmentsPage = ref(1);
+const pageSize = 25;
+const usersTotal = ref(0);
+const assignmentsTotal = ref(0);
 
 const selectedCount = computed(() => selectedIds.value.length);
 
@@ -29,10 +35,11 @@ async function loadAgents() {
   }
 }
 
-async function loadUsers(refresh = false) {
+async function loadUsers(refresh = false, nextPage = usersPage.value) {
+  usersPage.value = nextPage;
   loading.value = true;
   error.value = '';
-  const result = await api.remoteUsers(search.value, refresh);
+  const result = await api.remoteUsers(search.value, refresh, usersPage.value, pageSize);
   loading.value = false;
   if (result.code !== 'OK') {
     error.value = result.message;
@@ -40,6 +47,7 @@ async function loadUsers(refresh = false) {
   }
   const data = result.data as any;
   users.value = Array.isArray(data?.users) ? data.users : [];
+  usersTotal.value = data?.page?.total || 0;
 }
 
 function toggle(id: string) {
@@ -80,9 +88,14 @@ async function bind() {
   selectedIds.value = [];
 }
 
-async function loadAssignments() {
-  const result = await api.assignmentHistory();
-  if (result.code === 'OK') assignments.value = (result.data as any[]) || [];
+async function loadAssignments(nextPage = assignmentsPage.value) {
+  assignmentsPage.value = nextPage;
+  const result = await api.assignmentHistory(assignmentsPage.value, pageSize);
+  if (result.code === 'OK') {
+    const data = result.data as any;
+    assignments.value = data?.assignments || [];
+    assignmentsTotal.value = data?.page?.total || 0;
+  }
 }
 
 async function unbind(assignment: any) {
@@ -98,8 +111,8 @@ async function unbind(assignment: any) {
 
 onMounted(async () => {
   await loadAgents();
-  await loadUsers(false);
-  await loadAssignments();
+  await loadUsers(false, 1);
+  await loadAssignments(1);
 });
 </script>
 
@@ -174,6 +187,7 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="usersPage" :page-size="pageSize" :total="usersTotal" :disabled="loading" @change="(next) => loadUsers(false, next)" />
     </section>
 
     <section v-if="results.length" class="panel">
@@ -214,6 +228,7 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="assignmentsPage" :page-size="pageSize" :total="assignmentsTotal" @change="loadAssignments" />
     </section>
   </div>
 </template>

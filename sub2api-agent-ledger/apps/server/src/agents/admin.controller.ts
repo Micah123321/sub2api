@@ -98,32 +98,50 @@ export class AdminController {
   }
 
   @Patch('agents/:id')
-  patchAgent(
+  async patchAgent(
     @Req() request: AuthedRequest,
     @Param('id') id: string,
-    @Body() body: { status?: 'ACTIVE' | 'DISABLED' },
+    @Body() body: { status?: 'ACTIVE' | 'DISABLED'; name?: string; notes?: string },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
     this.requireAdmin(request);
     try {
-      if (!body.status) {
-        throw new Error('status 必填');
-      }
-      const agent = this.agents.setStatus(id, body.status);
+      const agent = body.status
+        ? this.agents.setStatus(id, body.status)
+        : await this.agents.update(id, { name: body.name, notes: body.notes });
       this.audit.write({
         actorId: request.auth?.userId,
         actorRole: request.auth?.role,
-        action: 'agents.status',
+        action: body.status ? 'agents.status' : 'agents.update',
         resourceType: 'agent',
         resourceId: id,
-        payload: { status: body.status },
+        payload: { status: body.status, name: body.name, notes: body.notes },
         requestId,
       });
       return ok(agent, requestId);
     } catch (error) {
       reply.status(400);
       return fail('INVALID_INPUT', error instanceof Error ? error.message : '更新失败', requestId);
+    }
+  }
+
+  @Post('agents/:id/password-reset')
+  async resetAgentPassword(
+    @Req() request: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { password?: string },
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const requestId = createRequestId();
+    this.requireAdmin(request);
+    try {
+      await this.agents.resetPassword(id, body.password ?? '');
+      this.audit.write({ actorId: request.auth?.userId, actorRole: request.auth?.role, action: 'agents.password_reset', resourceType: 'agent', resourceId: id, requestId });
+      return ok({ id }, requestId);
+    } catch (error) {
+      reply.status(400);
+      return fail('INVALID_INPUT', error instanceof Error ? error.message : '密码重置失败', requestId);
     }
   }
 
@@ -145,15 +163,17 @@ export class AdminController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Query('search') search?: string,
     @Query('refresh') refresh?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     const requestId = createRequestId();
     this.requireAdmin(request);
     try {
       if (refresh === '1' || refresh === 'true') {
-        const result = await this.sync.refreshUsers({ search });
-        return ok(result, requestId);
+        await this.sync.refreshUsers({ search, page: Number(page) || 1, pageSize: Number(pageSize) || 25 });
       }
-      return ok({ users: this.sync.listCachedUsers({ search }), latestSync: this.sync.latestSync() }, requestId);
+      const users = this.sync.listCachedUsersPage({ search, page, pageSize });
+      return ok({ users: users.items, page: users, latestSync: this.sync.latestSync() }, requestId);
     } catch (error) {
       reply.status(502);
       return fail(
@@ -210,9 +230,14 @@ export class AdminController {
   }
 
   @Get('assignments/history')
-  assignmentHistory(@Req() request: AuthedRequest) {
+  assignmentHistory(
+    @Req() request: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
     this.requireAdmin(request);
-    return ok(this.assignments.history(), createRequestId());
+    const history = this.assignments.historyPage({ page, pageSize });
+    return ok({ assignments: history.items, page: history }, createRequestId());
   }
 
   @Post('assignments/:id/unbind')
@@ -301,13 +326,18 @@ export class AdminController {
   }
 
   @Get('wallets/:agentId/ledger')
-  walletLedger(@Req() request: AuthedRequest, @Param('agentId') agentId: string) {
+  walletLedger(
+    @Req() request: AuthedRequest,
+    @Param('agentId') agentId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
     this.requireAdmin(request);
     const wallet = this.ledger.ensureWallet(agentId);
     return ok(
       {
         wallet: { ...wallet, source: 'local' },
-        transactions: this.ledger.listTransactions(wallet.id),
+        transactions: this.ledger.listTransactionsPage(wallet.id, { page, pageSize }),
       },
       createRequestId(),
     );
@@ -319,12 +349,14 @@ export class AdminController {
     @Query('agentId') agentId?: string,
     @Query('batchId') batchId?: string,
     @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     this.requireAdmin(request);
     return ok(
       {
         batches: this.cards.listBatches(agentId),
-        cards: this.cards.listCards({ agentId, batchId, status }),
+        cards: this.cards.listCardsPage({ agentId, batchId, status }, { page, pageSize }),
       },
       createRequestId(),
     );
@@ -447,9 +479,13 @@ export class AdminController {
   }
 
   @Get('audit-logs')
-  auditLogs(@Req() request: AuthedRequest) {
+  auditLogs(
+    @Req() request: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
     this.requireAdmin(request);
-    return ok(this.audit.list(), createRequestId());
+    return ok(this.audit.listPage({ page, pageSize }), createRequestId());
   }
 
   @Get('overview')

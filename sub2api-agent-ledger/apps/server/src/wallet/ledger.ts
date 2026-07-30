@@ -7,6 +7,7 @@ import {
   MoneyError,
 } from '../common/money';
 import { createId } from '../common/ids';
+import { normalizePage, type PageRequest, type PageResult } from '../common/pagination';
 
 export type LedgerTxType =
   | 'ADJUST_ADD'
@@ -131,15 +132,23 @@ export class LedgerService {
   }
 
   listTransactions(walletId: string, limit = 50): LedgerTransaction[] {
+    return this.listTransactionsPage(walletId, { page: 1, pageSize: limit }).items;
+  }
+
+  listTransactionsPage(walletId: string, request: PageRequest = {}): PageResult<LedgerTransaction> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number(
+      (this.sqlite.prepare('SELECT COUNT(*) AS total FROM ledger_transactions WHERE wallet_id = ?').get(walletId) as { total: number }).total,
+    );
     const rows = this.sqlite
       .prepare(
         `SELECT * FROM ledger_transactions
          WHERE wallet_id = ?
-         ORDER BY created_at DESC
-         LIMIT ?`,
+         ORDER BY created_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
       )
-      .all(walletId, limit) as TxRow[];
-    return rows.map(mapTx);
+      .all(walletId, pageSize, offset) as TxRow[];
+    return { items: rows.map(mapTx), page, pageSize, total };
   }
 
   recomputeBalance(walletId: string): number {

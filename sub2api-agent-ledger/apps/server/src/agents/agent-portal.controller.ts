@@ -93,14 +93,16 @@ export class AgentPortalController {
   users(
     @Req() request: AuthedRequest,
     @Query('agentId') agentIdQuery: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
     try {
       const session = this.requireAgent(request);
       const agentId = this.resolveAgentId(session, agentIdQuery);
-      const bindings = this.assignments.listActive(agentId);
-      const users = bindings.map((binding) => {
+      const bindings = this.assignments.listActivePage(agentId, { page, pageSize });
+      const users = bindings.items.map((binding) => {
         const remote = this.sync.getCachedUser(binding.mainUserId);
         return {
           assignmentId: binding.id,
@@ -114,7 +116,7 @@ export class AgentPortalController {
             : null,
         };
       });
-      return ok({ agentId, users }, requestId);
+      return ok({ agentId, users, page: bindings }, requestId);
     } catch (error) {
       reply.status(403);
       return fail('FORBIDDEN', error instanceof Error ? error.message : '无权访问', requestId);
@@ -127,6 +129,8 @@ export class AgentPortalController {
     @Param('userId') userId: string,
     @Query('agentId') agentIdQuery: string | undefined,
     @Query('refresh') refresh: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
@@ -142,16 +146,17 @@ export class AgentPortalController {
       }
 
       let remote = this.sync.getCachedUser(userId);
-      let usage = this.sync.listUsage(userId);
+      let usage = this.sync.listUsagePage(userId, { page, pageSize });
       let remoteError: string | null = null;
       if (refresh === '1' || refresh === 'true') {
         try {
           remote = await this.sync.refreshUser(userId);
-          usage = await this.sync.refreshUsage(userId);
+          await this.sync.refreshUsage(userId, { page, pageSize });
+          usage = this.sync.listUsagePage(userId, { page, pageSize });
         } catch (error) {
           remoteError = error instanceof Error ? error.message : '刷新失败';
           remote = this.sync.getCachedUser(userId);
-          usage = this.sync.listUsage(userId);
+          usage = this.sync.listUsagePage(userId, { page, pageSize });
         }
       }
 
@@ -164,10 +169,11 @@ export class AgentPortalController {
                 source: 'remote' as const,
               }
             : null,
-          usage: (usage as Array<Record<string, unknown>>).map((item) => ({
+          usage: usage.items.map((item) => ({
             ...item,
             source: 'remote' as const,
           })),
+          page: usage,
           remoteError,
         },
         requestId,
@@ -182,6 +188,8 @@ export class AgentPortalController {
   wallet(
     @Req() request: AuthedRequest,
     @Query('agentId') agentIdQuery: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
@@ -192,7 +200,7 @@ export class AgentPortalController {
       return ok(
         {
           wallet: { ...wallet, source: 'local' as const },
-          transactions: this.ledger.listTransactions(wallet.id, 30),
+          transactions: this.ledger.listTransactionsPage(wallet.id, { page, pageSize }),
         },
         requestId,
       );

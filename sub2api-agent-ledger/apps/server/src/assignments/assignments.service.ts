@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { createId } from '../common/ids';
+import { normalizePage, type PageRequest, type PageResult } from '../common/pagination';
 
 export interface AssignmentRecord {
   id: string;
@@ -46,15 +47,38 @@ export class AssignmentsService {
   }
 
   history(limit = 100): AssignmentRecord[] {
-    return (
-      this.sqlite
-        .prepare(
-          `SELECT * FROM agent_user_assignments
-           ORDER BY bound_at DESC
-           LIMIT ?`,
-        )
-        .all(limit) as Array<Record<string, unknown>>
-    ).map(mapAssignment);
+    return this.historyPage({ page: 1, pageSize: limit }).items;
+  }
+
+  historyPage(request: PageRequest = {}): PageResult<AssignmentRecord> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number((this.sqlite.prepare('SELECT COUNT(*) AS total FROM agent_user_assignments').get() as { total: number }).total);
+    const rows = this.sqlite
+      .prepare(
+        `SELECT * FROM agent_user_assignments
+         ORDER BY bound_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(pageSize, offset) as Array<Record<string, unknown>>;
+    return { items: rows.map(mapAssignment), page, pageSize, total };
+  }
+
+  listActivePage(agentId: string, request: PageRequest = {}): PageResult<AssignmentRecord> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number(
+      (this.sqlite
+        .prepare("SELECT COUNT(*) AS total FROM agent_user_assignments WHERE agent_id = ? AND status = 'ACTIVE'")
+        .get(agentId) as { total: number }).total,
+    );
+    const rows = this.sqlite
+      .prepare(
+        `SELECT * FROM agent_user_assignments
+         WHERE agent_id = ? AND status = 'ACTIVE'
+         ORDER BY bound_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(agentId, pageSize, offset) as Array<Record<string, unknown>>;
+    return { items: rows.map(mapAssignment), page, pageSize, total };
   }
 
   batchBind(input: {

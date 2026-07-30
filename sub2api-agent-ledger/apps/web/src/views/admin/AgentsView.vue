@@ -44,12 +44,30 @@ async function toggle(agent: any) {
   ) {
     return;
   }
-  const result = await api.patchAgent(agent.id, next);
+  const result = await api.patchAgent(agent.id, { status: next });
   if (result.code !== 'OK') {
     error.value = result.message;
     return;
   }
   await load();
+}
+
+async function edit(agent: any) {
+  const name = window.prompt('代理名称', agent.name);
+  if (!name?.trim()) return;
+  const notes = window.prompt('备注', agent.notes || '') ?? '';
+  const result = await api.patchAgent(agent.id, { name, notes });
+  if (result.code !== 'OK') error.value = result.message;
+  else await load();
+}
+
+async function resetPassword(agent: any) {
+  const password = window.prompt(`为「${agent.name}」设置新密码（至少 8 位）`);
+  if (!password) return;
+  if (!window.confirm('确认重置密码？该代理的所有现有登录会话将失效。')) return;
+  const result = await api.resetAgentPassword(agent.id, password);
+  if (result.code !== 'OK') error.value = result.message;
+  else window.alert('密码已重置，旧会话已失效');
 }
 
 onMounted(load);
@@ -99,6 +117,8 @@ onMounted(load);
                 <span class="mono"> {{ formatMoney(agent.walletBalanceMinor) }}</span>
               </td>
               <td>
+                <button class="secondary" type="button" @click="edit(agent)">编辑</button>
+                <button class="secondary" type="button" @click="resetPassword(agent)">重置密码</button>
                 <button
                   :class="agent.status === 'ACTIVE' ? 'danger' : 'secondary'"
                   type="button"

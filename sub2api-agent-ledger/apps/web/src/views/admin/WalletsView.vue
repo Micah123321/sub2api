@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { api } from '../../api/client';
 import { formatMoney, formatTime } from '../../types';
+import PaginationControls from '../../components/PaginationControls.vue';
 
 const agents = ref<any[]>([]);
 const agentId = ref('');
@@ -26,6 +27,9 @@ function newIdempotencyKey(): string {
   return `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 const idempotencyKey = ref(newIdempotencyKey());
+const page = ref(1);
+const pageSize = 25;
+const total = ref(0);
 
 async function loadAgents() {
   const result = await api.agents();
@@ -37,16 +41,19 @@ async function loadAgents() {
   if (!agentId.value && agents.value[0]) agentId.value = agents.value[0].id;
 }
 
-async function loadWallet() {
+async function loadWallet(nextPage = page.value) {
   if (!agentId.value) return;
+  page.value = nextPage;
   error.value = '';
-  const result = await api.walletLedger(agentId.value);
+  const result = await api.walletLedger(agentId.value, page.value, pageSize);
   if (result.code !== 'OK') {
     error.value = result.message;
     return;
   }
   wallet.value = (result.data as any)?.wallet;
-  transactions.value = (result.data as any)?.transactions || [];
+  const data = result.data as any;
+  transactions.value = data?.transactions?.items || [];
+  total.value = data?.transactions?.total || 0;
 }
 
 async function adjust() {
@@ -85,7 +92,7 @@ onMounted(async () => {
   await loadAgents();
 });
 
-watch(agentId, loadWallet);
+watch(agentId, () => void loadWallet(1));
 </script>
 
 <template>
@@ -155,6 +162,7 @@ watch(agentId, loadWallet);
           </tbody>
         </table>
       </div>
+      <PaginationControls :page="page" :page-size="pageSize" :total="total" @change="loadWallet" />
     </section>
   </div>
 </template>

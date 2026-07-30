@@ -47,7 +47,7 @@ const auditService = new AuditService(sqlite);
 const ledgerService = new LedgerService(sqlite);
 const settingsService = new SettingsService(sqlite, masterKey, createMainServiceClient);
 const syncService = new SyncService(sqlite, settingsService);
-const agentsService = new AgentsService(sqlite, ledgerService, userRepository);
+const agentsService = new AgentsService(sqlite, ledgerService, userRepository, sessionStore);
 const assignmentsService = new AssignmentsService(sqlite);
 const cardsService = new CardsService(sqlite, ledgerService);
 

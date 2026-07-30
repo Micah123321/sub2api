@@ -7,6 +7,7 @@ import {
   createMainServiceClient,
 } from '../remote/main-service-client';
 import type { SettingsService } from '../settings/settings.service';
+import { normalizePage, type PageRequest, type PageResult } from '../common/pagination';
 
 export type SyncStatus = 'fresh' | 'stale' | 'error';
 
@@ -39,20 +40,35 @@ export class SyncService {
   }
 
   listCachedUsers(options: { search?: string; limit?: number } = {}): CachedRemoteUser[] {
-    const limit = options.limit ?? 100;
+    return this.listCachedUsersPage({
+      search: options.search,
+      page: 1,
+      pageSize: options.limit ?? 100,
+    }).items;
+  }
+
+  listCachedUsersPage(
+    options: { search?: string } & PageRequest = {},
+  ): PageResult<CachedRemoteUser> {
+    const { page, pageSize, offset } = normalizePage(options);
     const search = options.search?.trim();
+    const where = search ? 'WHERE username LIKE ? OR email LIKE ? OR main_user_id LIKE ?' : '';
+    const params = search ? [`%${search}%`, `%${search}%`, `%${search}%`] : [];
+    const total = Number(
+      (this.sqlite.prepare(`SELECT COUNT(*) AS total FROM remote_users ${where}`).get(...params) as { total: number }).total,
+    );
     const rows = search
       ? (this.sqlite
           .prepare(
             `SELECT * FROM remote_users
              WHERE username LIKE ? OR email LIKE ? OR main_user_id LIKE ?
-             ORDER BY updated_at DESC LIMIT ?`,
+             ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
           )
-          .all(`%${search}%`, `%${search}%`, `%${search}%`, limit) as Array<Record<string, unknown>>)
+          .all(`%${search}%`, `%${search}%`, `%${search}%`, pageSize, offset) as Array<Record<string, unknown>>)
       : (this.sqlite
-          .prepare(`SELECT * FROM remote_users ORDER BY updated_at DESC LIMIT ?`)
-          .all(limit) as Array<Record<string, unknown>>);
-    return rows.map((row) => this.mapUser(row));
+          .prepare(`SELECT * FROM remote_users ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`)
+          .all(pageSize, offset) as Array<Record<string, unknown>>);
+    return { items: rows.map((row) => this.mapUser(row)), page, pageSize, total };
   }
 
   getCachedUser(mainUserId: string): CachedRemoteUser | null {
@@ -179,11 +195,12 @@ export class SyncService {
     }
   }
 
-  async refreshUsage(mainUserId: string) {
+  async refreshUsage(mainUserId: string, request: PageRequest = {}) {
     const runId = this.beginRun(`usage:${mainUserId}`);
     try {
       const client = this.client();
-      const usage = await client.listUsage({ userId: mainUserId, page: 1, pageSize: 50 });
+      const { page, pageSize } = normalizePage(request);
+      const usage = await client.listUsage({ userId: mainUserId, page, pageSize });
       const now = Date.now();
       const upsert = this.sqlite.prepare(
         `INSERT INTO remote_usage_records
@@ -216,7 +233,7 @@ export class SyncService {
       });
       tx();
       this.finishRun(runId, 'success');
-      return this.listUsage(mainUserId);
+      return this.listUsagePage(mainUserId, request);
     } catch (error) {
       this.finishRun(runId, 'error', error);
       throw error;
@@ -224,17 +241,28 @@ export class SyncService {
   }
 
   listUsage(mainUserId: string, limit = 50) {
-    return this.sqlite
+    return this.listUsagePage(mainUserId, { page: 1, pageSize: limit }).items;
+  }
+
+  listUsagePage(mainUserId: string, request: PageRequest = {}): PageResult<Record<string, unknown>> {
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number(
+      (this.sqlite
+        .prepare('SELECT COUNT(*) AS total FROM remote_usage_records WHERE main_user_id = ?')
+        .get(String(mainUserId)) as { total: number }).total,
+    );
+    const items = this.sqlite
       .prepare(
         `SELECT id, remote_record_id as remoteRecordId, main_user_id as mainUserId,
                 model, tokens, amount_micro as amountMicro,
                 occurred_at as occurredAt, observed_at as observedAt
          FROM remote_usage_records
          WHERE main_user_id = ?
-         ORDER BY occurred_at DESC
-         LIMIT ?`,
+         ORDER BY occurred_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
       )
-      .all(String(mainUserId), limit);
+      .all(String(mainUserId), pageSize, offset) as Array<Record<string, unknown>>;
+    return { items, page, pageSize, total };
   }
 
   latestSync(scopePrefix = 'users') {

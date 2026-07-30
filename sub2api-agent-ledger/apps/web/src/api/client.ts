@@ -120,16 +120,21 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  patchAgent(id: string, status: 'ACTIVE' | 'DISABLED') {
+  patchAgent(id: string, body: { status?: 'ACTIVE' | 'DISABLED'; name?: string; notes?: string }) {
     return request(`/api/admin/agents/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(body),
     });
   },
-  remoteUsers(search = '', refresh = false) {
+  resetAgentPassword(id: string, password: string) {
+    return request(`/api/admin/agents/${id}/password-reset`, { method: 'POST', body: JSON.stringify({ password }) });
+  },
+  remoteUsers(search = '', refresh = false, page = 1, pageSize = 25) {
     const query = new URLSearchParams();
     if (search) query.set('search', search);
     if (refresh) query.set('refresh', '1');
+    query.set('page', String(page));
+    query.set('pageSize', String(pageSize));
     return request(`/api/admin/remote-users?${query.toString()}`);
   },
   batchAssign(body: {
@@ -143,8 +148,8 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  assignmentHistory() {
-    return request('/api/admin/assignments/history');
+  assignmentHistory(page = 1, pageSize = 25) {
+    return request(`/api/admin/assignments/history?page=${page}&pageSize=${pageSize}`);
   },
   unbindAssignment(id: string) {
     return request(`/api/admin/assignments/${id}/unbind`, { method: 'POST' });
@@ -166,8 +171,8 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  walletLedger(agentId: string) {
-    return request(`/api/admin/wallets/${agentId}/ledger`);
+  walletLedger(agentId: string, page = 1, pageSize = 25) {
+    return request(`/api/admin/wallets/${agentId}/ledger?page=${page}&pageSize=${pageSize}`);
   },
   createCards(body: { agentId: string; count: number; value: number | string; idempotencyKey: string }) {
     return request('/api/admin/cards/batches', {
@@ -175,25 +180,27 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  cards(agentId?: string) {
-    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
-    return request(`/api/admin/cards${query}`);
+  cards(agentId?: string, page = 1, pageSize = 25) {
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (agentId) query.set('agentId', agentId);
+    return request(`/api/admin/cards?${query.toString()}`);
   },
   revokeCard(id: string) {
     return request(`/api/admin/cards/${id}/revoke`, { method: 'POST' });
   },
-  auditLogs() {
-    return request('/api/admin/audit-logs');
+  auditLogs(page = 1, pageSize = 25) {
+    return request(`/api/admin/audit-logs?page=${page}&pageSize=${pageSize}`);
   },
-  agentUsers() {
-    return request('/api/agent/users');
+  agentUsers(page = 1, pageSize = 25) {
+    return request(`/api/agent/users?page=${page}&pageSize=${pageSize}`);
   },
-  agentUser(userId: string, refresh = false) {
-    const query = refresh ? '?refresh=1' : '';
-    return request(`/api/agent/users/${userId}${query}`);
+  agentUser(userId: string, refresh = false, page = 1, pageSize = 25) {
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (refresh) query.set('refresh', '1');
+    return request(`/api/agent/users/${userId}?${query.toString()}`);
   },
-  agentWallet() {
-    return request('/api/agent/wallet');
+  agentWallet(page = 1, pageSize = 25) {
+    return request(`/api/agent/wallet?page=${page}&pageSize=${pageSize}`);
   },
   redeemCard(code: string, idempotencyKey: string) {
     return request('/api/agent/cards/redeem', {

@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { createId } from '../common/ids';
 import { displayCardMask, hashCardCode } from '../common/crypto';
 import { assertIntegerMinor } from '../common/money';
+import { normalizePage, type PageRequest, type PageResult } from '../common/pagination';
 import { LedgerService } from '../wallet/ledger';
 
 export interface CardBatch {
@@ -153,7 +154,10 @@ export class CardsService {
     return rows.map(mapBatch);
   }
 
-  listCards(filter: { agentId?: string; batchId?: string; status?: string } = {}): CardRecord[] {
+  listCardsPage(
+    filter: { agentId?: string; batchId?: string; status?: string } = {},
+    request: PageRequest = {},
+  ): PageResult<CardRecord> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.agentId) {
@@ -169,10 +173,18 @@ export class CardsService {
       params.push(filter.status);
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { page, pageSize, offset } = normalizePage(request);
+    const total = Number(
+      (this.sqlite.prepare(`SELECT COUNT(*) AS total FROM cards ${where}`).get(...params) as { total: number }).total,
+    );
     const rows = this.sqlite
-      .prepare(`SELECT * FROM cards ${where} ORDER BY created_at DESC LIMIT 500`)
-      .all(...params) as Array<Record<string, unknown>>;
-    return rows.map(mapCard);
+      .prepare(`SELECT * FROM cards ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...params, pageSize, offset) as Array<Record<string, unknown>>;
+    return { items: rows.map(mapCard), page, pageSize, total };
+  }
+
+  listCards(filter: { agentId?: string; batchId?: string; status?: string } = {}): CardRecord[] {
+    return this.listCardsPage(filter, { page: 1, pageSize: 100 }).items;
   }
 
   revoke(cardId: string): CardRecord {
