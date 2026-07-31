@@ -1009,6 +1009,8 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 			dbaccount.FieldRateLimitResetAt,
 			dbaccount.FieldOverloadUntil,
 			dbaccount.FieldTempUnschedulableUntil,
+			dbaccount.FieldType,
+			dbaccount.FieldExtra,
 		).
 		Order(dbent.Asc(dbaccount.FieldID)).
 		All(ctx)

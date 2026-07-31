@@ -292,6 +292,9 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 			}
 
 			eventsCreated++
+			if err := s.opsRepo.TouchAlertRuleTriggeredAt(ctx, rule.ID, now); err != nil {
+				logger.LegacyPrintf("service.ops_alert_evaluator", "[OpsAlertEvaluator] touch last_triggered_at failed (rule=%d): %v", rule.ID, err)
+			}
 			if created != nil && created.ID > 0 {
 				if s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created) {
 					emailsSent++
@@ -444,6 +447,43 @@ func parseOpsAlertRuleKeyword(filters map[string]any) string {
 	return strings.TrimSpace(keyword)
 }
 
+// parseOpsAlertRuleMinRemaining reads filters.min_remaining (USD) used by
+// account_quota_low_count to decide what counts as "running low".
+// Defaults to 1 USD when absent or unparsable.
+func parseOpsAlertRuleMinRemaining(filters map[string]any) float64 {
+	const defaultMinRemaining = 1.0
+	if filters == nil {
+		return defaultMinRemaining
+	}
+	raw, ok := filters["min_remaining"]
+	if !ok {
+		return defaultMinRemaining
+	}
+
+	var value float64
+	switch v := raw.(type) {
+	case float64:
+		value = v
+	case int64:
+		value = float64(v)
+	case int:
+		value = float64(v)
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return defaultMinRemaining
+		}
+		value = parsed
+	default:
+		return defaultMinRemaining
+	}
+
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return defaultMinRemaining
+	}
+	return value
+}
+
 func (s *OpsAlertEvaluatorService) computeRuleMetric(
 	ctx context.Context,
 	rule *OpsAlertRule,
@@ -515,6 +555,46 @@ func (s *OpsAlertEvaluatorService) computeRuleMetric(
 			return 0, false
 		}
 		return computeGroupAvailableRatio(availability.Group), true
+	case "group_quota_remaining":
+		if groupID == nil || *groupID <= 0 {
+			return 0, false
+		}
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		if availability.Group == nil || availability.Group.QuotaTrackedCount <= 0 {
+			// No account in this group has a quota limit: nothing to compare against.
+			return 0, false
+		}
+		return availability.Group.QuotaRemainingTotal, true
+	case "group_quota_remaining_ratio":
+		if groupID == nil || *groupID <= 0 {
+			return 0, false
+		}
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		return computeGroupQuotaRemainingRatio(availability.Group)
+	case "account_quota_low_count":
+		if s == nil || s.opsService == nil {
+			return 0, false
+		}
+		availability, err := s.opsService.GetAccountAvailability(ctx, platform, groupID)
+		if err != nil || availability == nil {
+			return 0, false
+		}
+		minRemaining := parseOpsAlertRuleMinRemaining(rule.Filters)
+		return float64(countAccountsByCondition(availability.Accounts, func(acc *AccountAvailability) bool {
+			return acc.QuotaTracked && acc.QuotaRemaining < minRemaining
+		})), true
 	case "account_rate_limited_count":
 		if s == nil || s.opsService == nil {
 			return 0, false
@@ -1170,6 +1250,16 @@ func computeGroupAvailableRatio(group *GroupAvailability) float64 {
 		return 0
 	}
 	return (float64(group.AvailableCount) / float64(group.TotalAccounts)) * 100
+}
+
+// computeGroupQuotaRemainingRatio returns the group's remaining quota as a percentage
+// of its configured total. Reports not-ok when no account in the group tracks a quota,
+// so the rule stays idle instead of firing on a meaningless 0%.
+func computeGroupQuotaRemainingRatio(group *GroupAvailability) (float64, bool) {
+	if group == nil || group.QuotaTrackedCount <= 0 || group.QuotaLimitTotal <= 0 {
+		return 0, false
+	}
+	return (group.QuotaRemainingTotal / group.QuotaLimitTotal) * 100, true
 }
 
 // countAccountsByCondition counts accounts that satisfy the given condition.

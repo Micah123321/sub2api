@@ -48,7 +48,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const draft = ref<AlertRule | null>(null)
 
-type MetricGroup = 'system' | 'group' | 'account'
+type MetricGroup = 'system' | 'group' | 'quota' | 'account' | 'proxy'
 
 interface MetricDefinition {
   type: MetricType
@@ -63,7 +63,9 @@ interface MetricDefinition {
 const groupMetricTypes = new Set<MetricType>([
   'group_available_accounts',
   'group_available_ratio',
-  'group_rate_limit_ratio'
+  'group_rate_limit_ratio',
+  'group_quota_remaining',
+  'group_quota_remaining_ratio'
 ])
 
 function parsePositiveInt(value: unknown): number | null {
@@ -91,6 +93,8 @@ const isGroupMetricSelected = computed(() => {
 })
 
 const isKeywordMetricSelected = computed(() => draft.value?.metric_type === 'keyword_normal_accounts')
+
+const isQuotaLowMetricSelected = computed(() => draft.value?.metric_type === 'account_quota_low_count')
 
 const draftGroupId = computed<number | null>({
   get() {
@@ -129,6 +133,28 @@ const draftKeyword = computed<string>({
     }
     if (!draft.value.filters) draft.value.filters = {}
     draft.value.filters.keyword = keyword
+  }
+})
+
+const draftMinRemaining = computed<number | null>({
+  get() {
+    const raw = draft.value?.filters?.min_remaining
+    if (raw == null) return null
+    const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw))
+    return Number.isFinite(n) && n >= 0 ? n : null
+  },
+  set(value) {
+    if (!draft.value) return
+    if (value == null || !Number.isFinite(value) || value < 0) {
+      if (!draft.value.filters) return
+      delete draft.value.filters.min_remaining
+      if (Object.keys(draft.value.filters).length === 0) {
+        delete draft.value.filters
+      }
+      return
+    }
+    if (!draft.value.filters) draft.value.filters = {}
+    draft.value.filters.min_remaining = value
   }
 })
 
@@ -222,6 +248,34 @@ const metricDefinitions = computed(() => {
       unit: '%'
     },
 
+    // Quota metrics (remaining budget)
+    {
+      type: 'group_quota_remaining',
+      group: 'quota',
+      label: t('admin.ops.alertRules.metrics.groupQuotaRemaining'),
+      description: t('admin.ops.alertRules.metricDescriptions.groupQuotaRemaining'),
+      recommendedOperator: '<',
+      recommendedThreshold: 10,
+      unit: '$'
+    },
+    {
+      type: 'group_quota_remaining_ratio',
+      group: 'quota',
+      label: t('admin.ops.alertRules.metrics.groupQuotaRemainingRatio'),
+      description: t('admin.ops.alertRules.metricDescriptions.groupQuotaRemainingRatio'),
+      recommendedOperator: '<',
+      recommendedThreshold: 20,
+      unit: '%'
+    },
+    {
+      type: 'account_quota_low_count',
+      group: 'quota',
+      label: t('admin.ops.alertRules.metrics.accountQuotaLowCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.accountQuotaLowCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 0
+    },
+
     // Account-level metrics
     {
       type: 'account_rate_limited_count',
@@ -271,6 +325,24 @@ const metricDefinitions = computed(() => {
       description: t('admin.ops.alertRules.metricDescriptions.keywordNormalAccounts'),
       recommendedOperator: '<',
       recommendedThreshold: 2
+    },
+
+    // Proxy metrics
+    {
+      type: 'proxy_expired_count',
+      group: 'proxy',
+      label: t('admin.ops.alertRules.metrics.proxyExpiredCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.proxyExpiredCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 0
+    },
+    {
+      type: 'proxy_expiring_soon_count',
+      group: 'proxy',
+      label: t('admin.ops.alertRules.metrics.proxyExpiringSoonCount'),
+      description: t('admin.ops.alertRules.metricDescriptions.proxyExpiringSoonCount'),
+      recommendedOperator: '>',
+      recommendedThreshold: 0
     }
   ] satisfies MetricDefinition[]
 })
@@ -297,7 +369,7 @@ const metricOptions = computed(() => {
     ]
   }
 
-  return [...buildGroup('system'), ...buildGroup('group'), ...buildGroup('account')]
+  return [...buildGroup('system'), ...buildGroup('group'), ...buildGroup('quota'), ...buildGroup('account'), ...buildGroup('proxy')]
 })
 
 const operatorOptions = computed(() => {
@@ -354,6 +426,13 @@ const editorValidation = computed(() => {
   }
   if (r.metric_type === 'keyword_normal_accounts' && !draftKeyword.value.trim()) {
     errors.push(t('admin.ops.alertRules.validation.keywordRequired'))
+  }
+  if (r.metric_type === 'account_quota_low_count' && r.filters?.min_remaining != null) {
+    const raw = r.filters.min_remaining
+    const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw))
+    if (!Number.isFinite(n) || n < 0) {
+      errors.push(t('admin.ops.alertRules.validation.minRemainingRange'))
+    }
   }
   if (!r.operator) errors.push(t('admin.ops.alertRules.validation.operatorRequired'))
   if (!(typeof r.threshold === 'number' && Number.isFinite(r.threshold)))
@@ -619,6 +698,21 @@ function cancelDelete() {
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.ops.alertRules.hints.keyword') }}
+            </p>
+          </div>
+
+          <div v-if="isQuotaLowMetricSelected" class="md:col-span-2">
+            <label class="input-label">{{ t('admin.ops.alertRules.form.minRemaining') }}</label>
+            <input
+              v-model.number="draftMinRemaining"
+              class="input"
+              type="number"
+              min="0"
+              step="0.01"
+              :placeholder="t('admin.ops.alertRules.form.minRemainingPlaceholder')"
+            />
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.alertRules.hints.minRemaining') }}
             </p>
           </div>
 

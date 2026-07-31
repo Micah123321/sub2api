@@ -624,6 +624,20 @@ func (r *opsRepository) UpdateAlertEventEmailSent(ctx context.Context, eventID i
 	return err
 }
 
+func (r *opsRepository) TouchAlertRuleTriggeredAt(ctx context.Context, ruleID int64, triggeredAt time.Time) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("nil ops repository")
+	}
+	if ruleID <= 0 {
+		return fmt.Errorf("invalid rule id")
+	}
+
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE ops_alert_rules SET last_triggered_at = $2, updated_at = NOW() WHERE id = $1",
+		ruleID, triggeredAt.UTC())
+	return err
+}
+
 type opsAlertEventRow interface {
 	Scan(dest ...any) error
 }

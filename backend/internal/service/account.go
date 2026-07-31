@@ -2554,6 +2554,57 @@ func (a *Account) IsQuotaExceeded() bool {
 	return false
 }
 
+// AccountQuotaSnapshot 描述账号在某一时刻的剩余额度视图。
+// Tracked 为 false 表示该账号未配置任何额度上限，其余字段无意义。
+type AccountQuotaSnapshot struct {
+	Tracked   bool
+	Limit     float64
+	Used      float64
+	Remaining float64
+}
+
+// QuotaSnapshot 返回账号最紧的额度维度（总额度/日额度/周额度中剩余最少的一个）。
+// 周期已过期的日/周额度视为未使用（下次 increment 会重置），与 IsQuotaExceeded 保持一致。
+// 仅对支持额度的账号类型（apikey / bedrock）生效。
+func (a *Account) QuotaSnapshot() AccountQuotaSnapshot {
+	if a == nil || !a.IsAPIKeyOrBedrock() {
+		return AccountQuotaSnapshot{}
+	}
+
+	out := AccountQuotaSnapshot{}
+	consider := func(limit, used float64) {
+		if limit <= 0 {
+			return
+		}
+		remaining := limit - used
+		if remaining < 0 {
+			remaining = 0
+		}
+		if out.Tracked && remaining >= out.Remaining {
+			return
+		}
+		out = AccountQuotaSnapshot{Tracked: true, Limit: limit, Used: used, Remaining: remaining}
+	}
+
+	consider(a.GetQuotaLimit(), a.GetQuotaUsed())
+	if limit := a.GetQuotaDailyLimit(); limit > 0 {
+		used := a.GetQuotaDailyUsed()
+		if a.IsDailyQuotaPeriodExpired() {
+			used = 0
+		}
+		consider(limit, used)
+	}
+	if limit := a.GetQuotaWeeklyLimit(); limit > 0 {
+		used := a.GetQuotaWeeklyUsed()
+		if a.IsWeeklyQuotaPeriodExpired() {
+			used = 0
+		}
+		consider(limit, used)
+	}
+
+	return out
+}
+
 // GetWindowCostLimit 获取 5h 窗口费用阈值（美元）
 // 返回 0 表示未启用
 func (a *Account) GetWindowCostLimit() float64 {

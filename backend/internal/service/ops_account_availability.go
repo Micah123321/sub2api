@@ -67,6 +67,8 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 
 		isAvailable := acc.Status == StatusActive && acc.Schedulable && !isRateLimited && !isOverloaded && !isTempUnsched
 
+		quota := acc.QuotaSnapshot()
+
 		if acc.Platform != "" {
 			if _, ok := platform[acc.Platform]; !ok {
 				platform[acc.Platform] = &PlatformAvailability{
@@ -108,6 +110,12 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			if hasError {
 				g.ErrorCount++
 			}
+			if quota.Tracked {
+				g.QuotaTrackedCount++
+				g.QuotaLimitTotal += quota.Limit
+				g.QuotaUsedTotal += quota.Used
+				g.QuotaRemainingTotal += quota.Remaining
+			}
 		}
 
 		displayGroupID := int64(0)
@@ -131,6 +139,11 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			HasError:      hasError,
 
 			ErrorMessage: acc.ErrorMessage,
+
+			QuotaTracked:   quota.Tracked,
+			QuotaLimit:     quota.Limit,
+			QuotaUsed:      quota.Used,
+			QuotaRemaining: quota.Remaining,
 		}
 
 		if isRateLimited && acc.RateLimitResetAt != nil {

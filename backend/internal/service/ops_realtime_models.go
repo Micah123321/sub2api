@@ -66,6 +66,14 @@ type GroupAvailability struct {
 	AvailableCount int64  `json:"available_count"`
 	RateLimitCount int64  `json:"rate_limit_count"`
 	ErrorCount     int64  `json:"error_count"`
+
+	// Quota aggregates cover only accounts with a configured quota limit
+	// (QuotaTrackedCount); accounts without a limit are excluded so the
+	// remaining sum is not diluted by unlimited accounts.
+	QuotaTrackedCount   int64   `json:"quota_tracked_count"`
+	QuotaLimitTotal     float64 `json:"quota_limit_total"`
+	QuotaUsedTotal      float64 `json:"quota_used_total"`
+	QuotaRemainingTotal float64 `json:"quota_remaining_total"`
 }
 
 // AccountAvailability represents current availability for a single account.
@@ -89,4 +97,11 @@ type AccountAvailability struct {
 	OverloadRemainingSec   *int64     `json:"overload_remaining_sec"`
 	ErrorMessage           string     `json:"error_message"`
 	TempUnschedulableUntil *time.Time `json:"temp_unschedulable_until,omitempty"`
+
+	// QuotaTracked is true only when the account has a positive quota limit.
+	// QuotaRemaining is clamped at 0 and is meaningless when QuotaTracked is false.
+	QuotaTracked   bool    `json:"quota_tracked"`
+	QuotaLimit     float64 `json:"quota_limit"`
+	QuotaUsed      float64 `json:"quota_used"`
+	QuotaRemaining float64 `json:"quota_remaining"`
 }

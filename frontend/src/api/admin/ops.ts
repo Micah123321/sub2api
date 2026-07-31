@@ -683,12 +683,17 @@ export type MetricType =
   | 'group_available_accounts'
   | 'group_available_ratio'
   | 'group_rate_limit_ratio'
+  | 'group_quota_remaining'
+  | 'group_quota_remaining_ratio'
   | 'keyword_normal_accounts'
   | 'account_rate_limited_count'
   | 'account_error_count'
   | 'account_error_ratio'
   | 'account_temp_unscheduled_count'
+  | 'account_quota_low_count'
   | 'overload_account_count'
+  | 'proxy_expired_count'
+  | 'proxy_expiring_soon_count'
 export type Operator = '>' | '>=' | '<' | '<=' | '==' | '!='
 
 export interface AlertRule {

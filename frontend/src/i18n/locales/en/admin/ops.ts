@@ -479,7 +479,9 @@ export default {
         metricGroups: {
           system: 'System Metrics',
           group: 'Group-level Metrics (requires group_id)',
-          account: 'Account-level Metrics'
+          quota: 'Quota Metrics',
+          account: 'Account-level Metrics',
+          proxy: 'Proxy Metrics'
         },
         metrics: {
           successRate: 'Success Rate (%)',
@@ -493,12 +495,17 @@ export default {
           groupAvailableAccounts: 'Group Available Accounts',
           groupAvailableRatio: 'Group Available Ratio (%)',
           groupRateLimitRatio: 'Group Rate Limit Ratio (%)',
+          groupQuotaRemaining: 'Group Remaining Quota ($)',
+          groupQuotaRemainingRatio: 'Group Remaining Quota Ratio (%)',
+          accountQuotaLowCount: 'Accounts Low on Quota',
           accountRateLimitedCount: 'Rate-limited Accounts',
           accountErrorCount: 'Error Accounts (excluding temporarily unschedulable)',
           accountErrorRatio: 'Error Account Ratio (%)',
           accountTempUnscheduledCount: 'Temporarily Unschedulable Accounts',
           overloadAccountCount: 'Overloaded Accounts',
-          keywordNormalAccounts: 'Normal Accounts by Keyword'
+          keywordNormalAccounts: 'Normal Accounts by Keyword',
+          proxyExpiredCount: 'Expired Proxies',
+          proxyExpiringSoonCount: 'Proxies Expiring Soon'
         },
         metricDescriptions: {
           successRate: 'Percentage of successful requests in the window (0-100).',
@@ -512,18 +519,24 @@ export default {
           groupAvailableAccounts: 'Number of available accounts in the selected group (requires group_id).',
           groupAvailableRatio: 'Available account ratio in the selected group (0-100, requires group_id).',
           groupRateLimitRatio: 'Rate-limited account ratio in the selected group (0-100, requires group_id).',
+          groupQuotaRemaining: 'Total remaining quota (USD) across accounts with a configured limit in the selected group (requires group_id). Accounts without a limit are excluded.',
+          groupQuotaRemainingRatio: 'Remaining quota as a percentage of the configured total in the selected group (0-100, requires group_id).',
+          accountQuotaLowCount: 'Number of accounts whose remaining quota is below the minimum below. Accounts without a limit are excluded.',
           accountRateLimitedCount: 'Number of rate-limited accounts within the window.',
           accountErrorCount: 'Number of error accounts within the window (excluding temporarily unschedulable).',
           accountErrorRatio: 'Error account ratio within the window (0-100).',
           accountTempUnscheduledCount: 'Number of accounts currently temporarily unschedulable (e.g. proxy/credential failure auto-eviction).',
           overloadAccountCount: 'Number of overloaded accounts within the window.',
-          keywordNormalAccounts: 'Matches account name, group name, platform, or account ID by keyword and counts accounts with active status.'
+          keywordNormalAccounts: 'Matches account name, group name, platform, or account ID by keyword and counts accounts with active status.',
+          proxyExpiredCount: 'Number of proxies that have already expired.',
+          proxyExpiringSoonCount: 'Number of proxies expiring within the warning period.'
         },
         hints: {
           recommended: 'Recommended: operator {operator}, threshold {threshold}{unit}',
           groupRequired: 'This is a group-level metric; selecting a group (group_id) is required.',
           groupOptional: 'Optional: limit the rule to a specific group via group_id.',
-          keyword: 'The keyword matches account name, group name, platform, and account ID case-insensitively.'
+          keyword: 'The keyword matches account name, group name, platform, and account ID case-insensitively.',
+          minRemaining: 'Accounts with remaining quota below this value (USD) are counted; defaults to 1 when empty. Uses the tightest of the account total, daily, and weekly quotas.'
         },
         table: {
           name: 'Name',
@@ -542,6 +555,8 @@ export default {
           allGroups: 'All groups',
           keyword: 'Keyword',
           keywordPlaceholder: 'e.g. claude or team-a',
+          minRemaining: 'Minimum remaining quota (USD)',
+          minRemainingPlaceholder: 'Defaults to 1',
           threshold: 'Threshold',
           severity: 'Severity',
           window: 'Window (minutes)',
@@ -557,6 +572,7 @@ export default {
           metricRequired: 'Metric is required',
           groupIdRequired: 'group_id is required for group-level metrics',
           keywordRequired: 'A keyword is required for this metric',
+          minRemainingRange: 'Minimum remaining quota must be a non-negative number',
           operatorRequired: 'Operator is required',
           thresholdRequired: 'Threshold must be a number',
           windowRange: 'Window must be one of: 1, 5, 60 minutes',

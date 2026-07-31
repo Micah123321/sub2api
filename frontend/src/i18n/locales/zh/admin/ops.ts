@@ -479,7 +479,9 @@ export default {
         metricGroups: {
           system: '系统指标',
           group: '分组级别指标（需 group_id）',
-          account: '账号级别指标'
+          quota: '额度指标',
+          account: '账号级别指标',
+          proxy: '代理指标'
         },
         metrics: {
           successRate: '成功率 (%)',
@@ -493,12 +495,17 @@ export default {
           groupAvailableAccounts: '分组可用账号数',
           groupAvailableRatio: '分组可用比例 (%)',
           groupRateLimitRatio: '分组限流比例 (%)',
+          groupQuotaRemaining: '分组剩余额度 ($)',
+          groupQuotaRemainingRatio: '分组剩余额度比例 (%)',
+          accountQuotaLowCount: '额度不足账号数',
           accountRateLimitedCount: '限流账号数',
           accountErrorCount: '错误账号数（不含临时不可调度）',
           accountErrorRatio: '错误账号比例 (%)',
           accountTempUnscheduledCount: '临时不可调度账号数',
           overloadAccountCount: '过载账号数',
-          keywordNormalAccounts: '关键词正常账号数'
+          keywordNormalAccounts: '关键词正常账号数',
+          proxyExpiredCount: '已过期代理数',
+          proxyExpiringSoonCount: '即将过期代理数'
         },
         metricDescriptions: {
           successRate: '统计窗口内成功请求占比（0~100）。',
@@ -512,18 +519,24 @@ export default {
           groupAvailableAccounts: '指定分组中当前可用账号数量（需要 group_id 过滤）。',
           groupAvailableRatio: '指定分组中可用账号占比（0~100，需要 group_id 过滤）。',
           groupRateLimitRatio: '指定分组中账号被限流的比例（0~100，需要 group_id 过滤）。',
+          groupQuotaRemaining: '指定分组中已配置额度的账号剩余额度总和（美元，需要 group_id 过滤）。未配置额度的账号不计入。',
+          groupQuotaRemainingRatio: '指定分组剩余额度占已配置额度总量的比例（0~100，需要 group_id 过滤）。',
+          accountQuotaLowCount: '剩余额度低于下方"额度下限"的账号数量。未配置额度的账号不计入。',
           accountRateLimitedCount: '统计窗口内被限流的账号数量。',
           accountErrorCount: '统计窗口内产生错误的账号数量（不含临时不可调度）。',
           accountErrorRatio: '统计窗口内错误账号占比（0~100）。',
           accountTempUnscheduledCount: '当前处于临时不可调度状态的账号数量（如代理/凭据故障被自动摘除）。',
           overloadAccountCount: '统计窗口内过载账号数量。',
-          keywordNormalAccounts: '按关键词匹配账号名、分组名、平台或账号 ID 后，统计状态为 active 的账号数量。'
+          keywordNormalAccounts: '按关键词匹配账号名、分组名、平台或账号 ID 后，统计状态为 active 的账号数量。',
+          proxyExpiredCount: '当前已过期的代理数量。',
+          proxyExpiringSoonCount: '在预警期内即将过期的代理数量。'
         },
         hints: {
           recommended: '推荐：运算符 {operator}，阈值 {threshold}{unit}',
           groupRequired: '该指标为分组级别指标，必须选择分组（group_id）。',
           groupOptional: '可选：通过 group_id 将规则限定到某个分组。',
-          keyword: '关键词按大小写不敏感方式匹配账号名、分组名、平台和账号 ID。'
+          keyword: '关键词按大小写不敏感方式匹配账号名、分组名、平台和账号 ID。',
+          minRemaining: '剩余额度低于该值（美元）的账号计入统计，留空默认 1。账号的总额度、日额度、周额度中取剩余最少的一项。'
         },
         table: {
           name: '名称',
@@ -542,6 +555,8 @@ export default {
           allGroups: '全部分组',
           keyword: '关键词',
           keywordPlaceholder: '例如：claude 或 team-a',
+          minRemaining: '额度下限（美元）',
+          minRemainingPlaceholder: '默认 1',
           threshold: '阈值',
           severity: '级别',
           window: '统计窗口（分钟）',
@@ -557,6 +572,7 @@ export default {
           metricRequired: '指标不能为空',
           groupIdRequired: '分组级别指标必须指定 group_id',
           keywordRequired: '关键词指标必须填写关键词',
+          minRemainingRange: '额度下限必须为非负数',
           operatorRequired: '运算符不能为空',
           thresholdRequired: '阈值必须为数字',
           windowRange: '统计窗口必须为 1 / 5 / 60 分钟之一',

@@ -165,6 +165,10 @@ func (m *opsRepoMock) UpdateAlertEventEmailSent(ctx context.Context, eventID int
 	return nil
 }
 
+func (m *opsRepoMock) TouchAlertRuleTriggeredAt(ctx context.Context, ruleID int64, triggeredAt time.Time) error {
+	return nil
+}
+
 func (m *opsRepoMock) CreateAlertSilence(ctx context.Context, input *OpsAlertSilence) (*OpsAlertSilence, error) {
 	return input, nil
 }

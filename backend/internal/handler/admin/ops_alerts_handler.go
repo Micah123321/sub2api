@@ -26,11 +26,14 @@ var validOpsAlertMetricTypes = []string{
 	"group_available_accounts",
 	"group_available_ratio",
 	"group_rate_limit_ratio",
+	"group_quota_remaining",
+	"group_quota_remaining_ratio",
 	"keyword_normal_accounts",
 	"account_rate_limited_count",
 	"account_error_count",
 	"account_error_ratio",
 	"account_temp_unscheduled_count",
+	"account_quota_low_count",
 	"overload_account_count",
 	"proxy_expired_count",
 	"proxy_expiring_soon_count",
@@ -96,6 +99,7 @@ func isPercentOrRateMetric(metricType string) bool {
 		"memory_usage_percent",
 		"group_available_ratio",
 		"group_rate_limit_ratio",
+		"group_quota_remaining_ratio",
 		"account_error_ratio":
 		return true
 	default:
@@ -103,23 +107,88 @@ func isPercentOrRateMetric(metricType string) bool {
 	}
 }
 
-func validateOpsAlertRuleFilters(raw json.RawMessage, metricType string) error {
-	if metricType != "keyword_normal_accounts" {
+// opsAlertGroupScopedMetrics require a positive filters.group_id: the evaluator
+// silently skips them otherwise, so reject the rule at creation time instead.
+var opsAlertGroupScopedMetrics = map[string]struct{}{
+	"group_available_accounts":    {},
+	"group_available_ratio":       {},
+	"group_rate_limit_ratio":      {},
+	"group_quota_remaining":       {},
+	"group_quota_remaining_ratio": {},
+}
+
+func parseOpsAlertRuleFilters(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
 		return nil
 	}
-	if len(raw) == 0 {
-		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
+	var filters map[string]any
+	if err := json.Unmarshal(raw, &filters); err != nil {
+		return nil
+	}
+	return filters
+}
+
+// opsAlertFilterPositiveInt accepts the JSON shapes a group_id can arrive in
+// (number from the UI, string from hand-written payloads).
+func opsAlertFilterPositiveInt(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if v > 0 && v == math.Trunc(v) {
+			return int64(v), true
+		}
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err == nil && parsed > 0 {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func validateOpsAlertRuleFilters(raw json.RawMessage, metricType string) error {
+	filters := parseOpsAlertRuleFilters(raw)
+
+	if _, ok := opsAlertGroupScopedMetrics[metricType]; ok {
+		groupID, valid := opsAlertFilterPositiveInt(filters["group_id"])
+		if !valid || groupID <= 0 {
+			return fmt.Errorf("filters.group_id is required for metric_type %s", metricType)
+		}
 	}
 
-	var filters map[string]any
-	if err := json.Unmarshal(raw, &filters); err != nil || filters == nil {
-		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
+	if metricType == "account_quota_low_count" {
+		if v, ok := filters["min_remaining"]; ok {
+			remaining, valid := opsAlertFilterFloat(v)
+			if !valid || remaining < 0 {
+				return fmt.Errorf("filters.min_remaining must be a non-negative number")
+			}
+		}
+	}
+
+	if metricType != "keyword_normal_accounts" {
+		return nil
 	}
 	keyword, ok := filters["keyword"].(string)
 	if !ok || strings.TrimSpace(keyword) == "" {
 		return fmt.Errorf("filters.keyword is required for metric_type %s", metricType)
 	}
 	return nil
+}
+
+func opsAlertFilterFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false
+		}
+		return v, true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return 0, false
+		}
+		return parsed, true
+	}
+	return 0, false
 }
 
 func validateOpsAlertRulePayload(raw map[string]json.RawMessage) (*opsAlertRuleValidatedInput, error) {
