@@ -28,6 +28,8 @@ services:
     image: ${SUB2API_IMAGE:-ghcr.io/micah123321/sub2api:custom}
     container_name: sub2api
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: 100000
