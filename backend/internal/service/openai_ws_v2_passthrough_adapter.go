@@ -921,6 +921,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		controlCtx:           ctx,
 		interTurnIdleTimeout: s.openAIWSIngressInterTurnIdleTimeout(),
 		interTurnStarted:     make(chan struct{}, 1),
+		restoreResponseModel: func(payload []byte) []byte {
+			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			if !openAIWSEventMayContainModel(eventType) {
+				return payload
+			}
+			requestModel, upstreamModel := usageMeta.turnModels("")
+			return replaceOpenAIWSMessageModel(payload, upstreamModel, requestModel)
+		},
 		afterWrite: func(msgType coderws.MessageType, payload []byte) {
 			notifyOpenAIWSAfterResponse(hooks, int(completedTurns.Load())+1, msgType, payload)
 		},
