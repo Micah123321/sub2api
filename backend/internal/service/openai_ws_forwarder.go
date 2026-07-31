@@ -217,6 +217,9 @@ type OpenAIWSIngressHooks struct {
 	ReasoningEffortMappings []ReasoningEffortMapping
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
+	// MapRequestModel resolves the current turn's client model to the model
+	// that must be written into the upstream response.create frame.
+	MapRequestModel func(turn int, originalModel string) (string, error)
 	// AfterResponse observes a text event only after it was written to the client.
 	// Binary frames are intentionally excluded from conversation capture.
 	AfterResponse func(turn int, payload []byte)

@@ -26,6 +26,9 @@ type openAIWSClientFrameConn struct {
 	interTurnStarted     chan struct{}
 	waitingForNextTurn   atomic.Bool
 	afterWrite           func(msgType coderws.MessageType, payload []byte)
+	// The relay observes upstream payloads, while clients must keep seeing the
+	// model identifier they supplied for the current turn.
+	restoreResponseModel func([]byte) []byte
 }
 
 // openAIWSPolicyEnforcingFrameConn wraps a client-side FrameConn and runs
