@@ -38,14 +38,14 @@ onMounted(async () => {
           <div class="stat-value">{{ formatMoney(data.localBalanceMinor || 0) }}</div>
         </div>
       </div>
-      <section class="panel" style="margin-top:16px">
+      <section class="panel">
         <h2 class="section-title">同步状态</h2>
         <div class="row-actions">
           <span class="source-chip remote">远程</span>
           <span class="mono">{{ data.latestSync?.status || '尚未同步' }}</span>
           <span class="muted mono">{{ formatTime(data.latestSync?.finishedAt || data.latestSync?.startedAt) }}</span>
         </div>
-        <p v-if="data.latestSync?.errorMessage" class="error" style="margin-top:10px">
+        <p v-if="data.latestSync?.errorMessage" class="error" style="margin-top:12px">
           {{ data.latestSync.errorMessage }}
         </p>
       </section>

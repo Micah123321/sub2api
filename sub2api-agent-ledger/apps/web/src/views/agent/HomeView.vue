@@ -176,7 +176,7 @@ onMounted(load);
       </div>
     </section>
 
-    <section class="panel" style="margin-top:16px">
+    <section class="panel">
       <h2 class="section-title">旗下用户 <span class="source-chip remote">远程</span></h2>
       <p v-if="loading" class="muted">加载中…</p>
       <div v-else-if="!users.length" class="empty">暂无绑定用户</div>
@@ -213,7 +213,7 @@ onMounted(load);
       <PaginationControls :page="usersPage" :page-size="pageSize" :total="usersTotal" :disabled="loading" @change="(next) => load(next, walletPage)" />
     </section>
 
-    <section v-if="selected" class="panel" style="margin-top:16px">
+    <section v-if="selected" class="panel">
       <h2 class="section-title">用户详情</h2>
       <div class="row-actions" style="margin-bottom:12px">
         <span class="source-chip remote">远程</span>

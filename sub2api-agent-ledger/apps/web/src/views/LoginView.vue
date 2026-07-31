@@ -24,7 +24,7 @@ async function submit() {
 <template>
   <main class="shell">
     <section class="intro-panel">
-      <p class="eyebrow">AGENT LEDGER</p>
+      <p class="eyebrow">Agent Ledger</p>
       <h1>登录账本工作台</h1>
       <p class="intro-copy">管理代理商账本、余额与卡密。</p>
       <form class="form-grid" style="margin-top:24px" @submit.prevent="submit">
@@ -51,27 +51,30 @@ async function submit() {
   display: grid;
   place-items: center;
   padding: 24px;
+  background: var(--canvas-parchment);
 }
 .intro-panel {
   width: min(480px, 100%);
-  padding: 36px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  padding: 48px;
+  border-radius: var(--radius-lg);
+  background: var(--canvas);
 }
 .eyebrow {
   margin: 0 0 12px;
-  color: var(--local);
-  font-family: "IBM Plex Mono", monospace;
-  letter-spacing: 0.12em;
-  font-size: 12px;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.224px;
 }
 h1 {
   margin: 0;
   font-size: 34px;
+  font-weight: 600;
   line-height: 1.1;
+  letter-spacing: -0.374px;
 }
 .intro-copy {
   margin: 14px 0 0;
-  color: var(--muted);
+  color: var(--ink-muted-48);
 }
 </style>

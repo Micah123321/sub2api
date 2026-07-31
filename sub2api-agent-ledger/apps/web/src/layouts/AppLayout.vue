@@ -30,7 +30,7 @@ async function logout() {
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">AGENT LEDGER</div>
+      <div class="brand">Agent Ledger</div>
       <nav class="nav-list">
         <RouterLink
           v-for="link in links"
@@ -41,7 +41,7 @@ async function logout() {
           {{ link.label }}
         </RouterLink>
       </nav>
-      <div class="muted" style="margin-top:auto;font-size:12px">
+      <div class="muted" style="margin-top:auto;font-size:12px;letter-spacing:-0.12px;padding:0 12px">
         {{ session.user?.role }} · {{ session.user?.userId?.slice(0, 8) }}
       </div>
     </aside>
@@ -52,7 +52,7 @@ async function logout() {
           <span class="source-chip local">本地账本</span>
         </div>
         <div class="row-actions">
-          <span class="muted mono">{{ session.user?.role }}</span>
+          <span class="muted mono" style="font-size:14px">{{ session.user?.role }}</span>
           <button class="secondary" type="button" @click="logout">退出</button>
         </div>
       </header>
