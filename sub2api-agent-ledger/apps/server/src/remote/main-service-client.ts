@@ -8,6 +8,8 @@ import {
   type MainServiceUser,
 } from './schemas';
 import { parseMajorToMinor } from '../common/money';
+import { readLimitedJson, ResponseBodyError } from './read-limited-json';
+import { resolveAllowedRemoteUrl, resolveRemoteBaseUrl } from './base-url';
 
 export type RemoteErrorCode =
   | 'UNAUTHORIZED'
@@ -18,7 +20,9 @@ export type RemoteErrorCode =
   | 'INVALID_RESPONSE'
   | 'SERVER_ERROR'
   | 'NOT_FOUND'
-  | 'TWO_FACTOR_REQUIRED';
+  | 'TWO_FACTOR_REQUIRED'
+  | 'TURNSTILE_REQUIRED'
+  | 'INSECURE_TRANSPORT';
 
 export class RemoteError extends Error {
   constructor(
@@ -64,14 +68,17 @@ export interface MainServiceClientOptions {
   adminEmail: string;
   adminPassword: string;
   timeoutMs?: number;
+  allowInsecureHttp?: boolean;
   fetchImpl?: typeof fetch;
 }
 
-const ALLOWED_PATHS = new Set([
-  '/api/v1/admin/users',
-  '/api/v1/admin/usage',
-  '/api/v1/admin/usage/stats',
-]);
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+interface RemoteResponse {
+  status: number;
+  ok: boolean;
+  json: unknown;
+}
 
 export class MainServiceClient {
   private readonly baseUrl: string;
@@ -80,9 +87,16 @@ export class MainServiceClient {
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private accessToken: string | null = null;
+  private loginPromise: Promise<string> | null = null;
 
   constructor(options: MainServiceClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, '');
+    try {
+      this.baseUrl = resolveRemoteBaseUrl(options.baseUrl, Boolean(options.allowInsecureHttp));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '主服务地址无效';
+      const code = message.includes('HTTPS') ? 'INSECURE_TRANSPORT' : 'INVALID_RESPONSE';
+      throw new RemoteError(code, message);
+    }
     this.adminEmail = options.adminEmail;
     this.adminPassword = options.adminPassword;
     this.timeoutMs = options.timeoutMs ?? 10_000;
@@ -134,7 +148,7 @@ export class MainServiceClient {
   }
 
   async getUser(userId: string | number): Promise<MainServiceUser> {
-    const payload = await this.getJson(`/api/v1/admin/users/${userId}`);
+    const payload = await this.getJson(`/api/v1/admin/users/${encodeURIComponent(String(userId))}`);
     return mainServiceUserSchema.parse(payload);
   }
 
@@ -161,14 +175,16 @@ export class MainServiceClient {
       page_size: String(pageSize),
     });
     const payload = await this.getJson(
-      `/api/v1/admin/users/${userId}/balance-history?${query.toString()}`,
+      `/api/v1/admin/users/${encodeURIComponent(String(userId))}/balance-history?${query.toString()}`,
     );
     return payload as Record<string, unknown>;
   }
 
   async getUserUsage(userId: string | number, period = 'month'): Promise<unknown> {
     const query = new URLSearchParams({ period });
-    return this.getJson(`/api/v1/admin/users/${userId}/usage?${query.toString()}`);
+    return this.getJson(
+      `/api/v1/admin/users/${encodeURIComponent(String(userId))}/usage?${query.toString()}`,
+    );
   }
 
   async listUsage(params: ListUsageParams = {}): Promise<{
@@ -197,15 +213,6 @@ export class MainServiceClient {
   }
 
   private async getJson(pathWithQuery: string): Promise<unknown> {
-    const path = pathWithQuery.split('?')[0];
-    const allowed =
-      ALLOWED_PATHS.has(path) ||
-      /^\/api\/v1\/admin\/users\/[^/]+$/.test(path) ||
-      /^\/api\/v1\/admin\/users\/[^/]+\/(usage|balance-history)$/.test(path);
-    if (!allowed) {
-      throw new RemoteError('FORBIDDEN', `未登记的远程路径: ${path}`);
-    }
-
     let token = await this.getAccessToken();
     let response = await this.request(pathWithQuery, {
       method: 'GET',
@@ -216,7 +223,9 @@ export class MainServiceClient {
     });
 
     if (response.status === 401) {
-      this.accessToken = null;
+      if (this.accessToken === token) {
+        this.accessToken = null;
+      }
       token = await this.getAccessToken();
       response = await this.request(pathWithQuery, {
         method: 'GET',
@@ -235,6 +244,20 @@ export class MainServiceClient {
       return this.accessToken;
     }
 
+    if (!this.loginPromise) {
+      const loginPromise = this.login();
+      this.loginPromise = loginPromise;
+      const clearLoginPromise = () => {
+        if (this.loginPromise === loginPromise) {
+          this.loginPromise = null;
+        }
+      };
+      void loginPromise.then(clearLoginPromise, clearLoginPromise);
+    }
+    return this.loginPromise;
+  }
+
+  private async login(): Promise<string> {
     const response = await this.request('/api/v1/auth/login', {
       method: 'POST',
       headers: {
@@ -246,7 +269,7 @@ export class MainServiceClient {
         password: this.adminPassword,
       }),
     });
-    const payload = await this.parseEnvelope(response);
+    const payload = this.parseEnvelope(response);
     const login = mainServiceLoginSchema.safeParse(payload);
     if (!login.success) {
       throw new RemoteError('INVALID_RESPONSE', '主服务登录响应无效', response.status);
@@ -266,17 +289,35 @@ export class MainServiceClient {
     return this.accessToken;
   }
 
-  private async request(pathWithQuery: string, init: RequestInit): Promise<Response> {
+  private async request(pathWithQuery: string, init: RequestInit): Promise<RemoteResponse> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      return await this.fetchImpl(`${this.baseUrl}${pathWithQuery}`, {
+      let url: string;
+      try {
+        url = resolveAllowedRemoteUrl(this.baseUrl, pathWithQuery, init.method || 'GET');
+      } catch (error) {
+        throw new RemoteError(
+          'FORBIDDEN',
+          error instanceof Error ? error.message : '远程请求路径无效',
+        );
+      }
+      const response = await this.fetchImpl(url, {
         ...init,
         signal: controller.signal,
+        redirect: 'manual',
       });
+      if (response.status >= 300 && response.status < 400) {
+        throw new RemoteError('INVALID_RESPONSE', '主服务返回了不允许的重定向', response.status);
+      }
+      const json = await readLimitedJson(response, controller, MAX_RESPONSE_BYTES);
+      return { status: response.status, ok: response.ok, json };
     } catch (error) {
       if (error instanceof RemoteError) {
         throw error;
+      }
+      if (error instanceof ResponseBodyError) {
+        throw new RemoteError('INVALID_RESPONSE', error.message);
       }
       if (error instanceof Error && error.name === 'AbortError') {
         throw new RemoteError('TIMEOUT', `主服务请求超时 (${this.timeoutMs}ms)`);
@@ -290,7 +331,16 @@ export class MainServiceClient {
     }
   }
 
-  private async parseEnvelope(response: Response): Promise<unknown> {
+  private parseEnvelope(response: RemoteResponse): unknown {
+    const envelope = mainServiceEnvelopeSchema.safeParse(response.json);
+    const reason = envelope.success ? envelope.data.reason : undefined;
+    if (reason === 'TURNSTILE_VERIFICATION_FAILED') {
+      throw new RemoteError(
+        'TURNSTILE_REQUIRED',
+        '主服务启用了 Turnstile，后台邮箱/密码登录无法完成验证',
+        response.status,
+      );
+    }
     if (response.status === 401) {
       throw new RemoteError('UNAUTHORIZED', '主服务认证失败', 401);
     }
@@ -310,14 +360,6 @@ export class MainServiceClient {
       throw new RemoteError('INVALID_RESPONSE', `主服务响应异常 ${response.status}`, response.status);
     }
 
-    let json: unknown;
-    try {
-      json = await response.json();
-    } catch {
-      throw new RemoteError('INVALID_RESPONSE', '主服务返回了非 JSON 响应', response.status);
-    }
-
-    const envelope = mainServiceEnvelopeSchema.safeParse(json);
     if (!envelope.success) {
       throw new RemoteError('INVALID_RESPONSE', '主服务响应 envelope 无效', response.status);
     }
@@ -340,6 +382,13 @@ export function createMainServiceClient(
   adminEmail: string,
   adminPassword: string,
   fetchImpl?: typeof fetch,
+  allowInsecureHttp = false,
 ): MainServiceClient {
-  return new MainServiceClient({ baseUrl, adminEmail, adminPassword, fetchImpl });
+  return new MainServiceClient({
+    baseUrl,
+    adminEmail,
+    adminPassword,
+    fetchImpl,
+    allowInsecureHttp,
+  });
 }

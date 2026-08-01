@@ -20,7 +20,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS plugin_users_username_uq ON plugin_users(usern
 CREATE INDEX IF NOT EXISTS plugin_users_agent_idx ON plugin_users(agent_id);
 
 CREATE TABLE IF NOT EXISTS main_service_settings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id INTEGER PRIMARY KEY CHECK (id = 1),
   base_url TEXT NOT NULL,
   api_key_ciphertext TEXT NOT NULL,
   key_version INTEGER NOT NULL DEFAULT 1,
@@ -189,6 +189,7 @@ export const MIGRATION_ID = '0001_init';
 export const MIGRATION_USAGE_MICRO_ID = '0002_usage_amount_micro';
 export const MIGRATION_PAID_CARD_ISSUE_ID = '0003_paid_card_issue';
 export const MIGRATION_ADMIN_LOGIN_ID = '0004_main_service_admin_login';
+export const MIGRATION_SETTINGS_SINGLETON_ID = '0005_main_service_settings_singleton';
 
 // remote_usage_records 是主服务用量的只读缓存，重建后会由下一次同步重新拉取，
 // 因此这里直接重建表而不是转换旧值：旧列存的是「分」，小额用量已被舍入成 0，
@@ -264,6 +265,30 @@ function migrateMainServiceAdminLogin(sqlite: Database.Database): void {
   );
 }
 
+function migrateMainServiceSettingsSingleton(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE main_service_settings_singleton (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      base_url TEXT NOT NULL,
+      api_key_ciphertext TEXT NOT NULL,
+      key_version INTEGER NOT NULL DEFAULT 1,
+      admin_email_ciphertext TEXT NOT NULL DEFAULT '',
+      admin_password_ciphertext TEXT NOT NULL DEFAULT '',
+      credential_version INTEGER NOT NULL DEFAULT 1,
+      updated_by TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO main_service_settings_singleton
+      (id, base_url, api_key_ciphertext, key_version, admin_email_ciphertext,
+       admin_password_ciphertext, credential_version, updated_by, updated_at)
+    SELECT 1, base_url, api_key_ciphertext, key_version, admin_email_ciphertext,
+           admin_password_ciphertext, credential_version, updated_by, updated_at
+    FROM main_service_settings ORDER BY id ASC LIMIT 1;
+    DROP TABLE main_service_settings;
+    ALTER TABLE main_service_settings_singleton RENAME TO main_service_settings;
+  `);
+}
+
 export function runMigrations(sqlite: Database.Database): { applied: string[] } {
   sqlite.exec(MIGRATION_SQL);
   const applied: string[] = [];
@@ -315,6 +340,19 @@ export function runMigrations(sqlite: Database.Database): { applied: string[] } 
         .run(MIGRATION_ADMIN_LOGIN_ID, Date.now());
     })();
     applied.push(MIGRATION_ADMIN_LOGIN_ID);
+  }
+
+  const hasSettingsSingleton = sqlite
+    .prepare('SELECT id FROM schema_migrations WHERE id = ?')
+    .get(MIGRATION_SETTINGS_SINGLETON_ID) as { id: string } | undefined;
+  if (!hasSettingsSingleton) {
+    sqlite.transaction(() => {
+      migrateMainServiceSettingsSingleton(sqlite);
+      sqlite
+        .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(MIGRATION_SETTINGS_SINGLETON_ID, Date.now());
+    })();
+    applied.push(MIGRATION_SETTINGS_SINGLETON_ID);
   }
 
   return { applied };

@@ -18,13 +18,15 @@ git clone https://github.com/Micah123321/sub2api.git
 cd sub2api
 
 cp deploy/agent-ledger/.env.example deploy/agent-ledger/.env
-# 编辑 deploy/agent-ledger/.env（至少 SESSION_SECRET / PLUGIN_MASTER_KEY / BOOTSTRAP_ADMIN_PASSWORD）
+# 编辑 deploy/agent-ledger/.env（至少三个必填密钥/密码；保留默认 HTTP 主服务地址时，还要把 MAIN_SERVICE_ALLOW_INSECURE_HTTP 改为 true）
 
 docker compose \
   -f deploy/agent-ledger/docker-compose.yml \
   --env-file deploy/agent-ledger/.env \
   up -d --build
 ```
+
+浏览器会话配置：直接使用 HTTP 公网地址时保持 `SESSION_COOKIE_SECURE=false`；浏览器不会在 HTTP 下保存 `Secure` Cookie。使用 HTTPS 或 TLS 反向代理对外提供服务时设置 `SESSION_COOKIE_SECURE=true`。前端与 API 跨源部署时，`CORS_ORIGINS` 必须包含前端的完整 origin，服务端会携带凭据响应。
 
 访问：
 
@@ -48,12 +50,14 @@ docker compose -f deploy/agent-ledger/docker-compose.yml --env-file deploy/agent
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `SESSION_SECRET` | 是 | Cookie 会话密钥，≥16 字符 |
+| `SESSION_COOKIE_SECURE` | 否 | 会话 Cookie 的 `Secure` 属性；HTTP 设为 `false`，HTTPS 设为 `true`；未配置时生产环境默认开启 |
 | `PLUGIN_MASTER_KEY` | 是 | 加密主服务管理员凭据，建议 32 字节 base64 |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 是 | 首次管理员密码 |
-| `MAIN_SERVICE_BASE_URL` | 否 | 默认 `http://host.docker.internal:8080` |
+| `MAIN_SERVICE_BASE_URL` | 否 | 默认 `http://host.docker.internal:8080`；使用该默认值时需显式开启 HTTP 兼容开关 |
+| `MAIN_SERVICE_ALLOW_INSECURE_HTTP` | 否 | 远程 HTTP 兼容开关，默认 `false`；开启会明文传输管理员密码 |
 | `MAIN_SERVICE_ADMIN_EMAIL` | 否 | 首次引导用主服务管理员邮箱；也可在插件设置页配置 |
 | `MAIN_SERVICE_ADMIN_PASSWORD` | 否 | 首次引导用管理员密码；只用于服务端登录并加密保存 |
-| `CORS_ORIGINS` | 否 | 前端源白名单，逗号分隔 |
+| `CORS_ORIGINS` | 否 | 携带 Cookie 的前端源白名单，填写完整 origin，逗号分隔 |
 | `AGENT_LEDGER_PORT` | 否 | 宿主机端口，默认 `4173` |
 
 生成密钥：
@@ -66,10 +70,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 - 不写入主服务数据库，不改主服务 compose。
 - 通过 `/api/v1/auth/login` 获取管理员 JWT；JWT 失效后自动重新登录一次。
-- 主服务启用管理员 TOTP 或强制 Turnstile 时，邮箱/密码自动登录可能被拒绝。
+- 登录和 Admin API 请求拒绝重定向；远程主服务默认必须使用 HTTPS。
+- 主服务启用管理员 TOTP 或强制 Turnstile 时，邮箱/密码自动登录会返回对应错误。
 - 环境变量仅在 SQLite 尚未配置主服务时导入；后续请在插件设置页更新凭据。
-- 宿主机主服务：`MAIN_SERVICE_BASE_URL=http://host.docker.internal:8080`
-- 同 Docker 网络：改为服务名，例如 `http://sub2api:8080`，并把本服务加入该网络。
+- 宿主机主服务：`MAIN_SERVICE_BASE_URL=http://host.docker.internal:8080`，同时设置 `MAIN_SERVICE_ALLOW_INSECURE_HTTP=true`
+- 同 Docker 网络：改为服务名，例如 `http://sub2api:8080`，加入该网络，并显式设置 `MAIN_SERVICE_ALLOW_INSECURE_HTTP=true`；生产环境应优先配置 HTTPS。
+- 远程旧服务暂时只能使用 HTTP 时，也必须显式设置该兼容开关；此时管理员密码会以明文通过网络传输。
 
 ## 镜像单独构建
 

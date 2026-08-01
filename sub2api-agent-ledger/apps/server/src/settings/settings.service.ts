@@ -14,7 +14,7 @@ export interface MainServiceSettingsView {
 }
 
 export interface SaveMainServiceSettingsInput {
-  baseUrl: string;
+  baseUrl?: string;
   adminEmail?: string;
   adminPassword?: string;
   updatedBy?: string | null;
@@ -54,8 +54,8 @@ export class SettingsService {
       return emptyView();
     }
 
-    let adminEmail = '';
-    let passwordConfigured = false;
+    let adminEmail: string;
+    let passwordConfigured: boolean;
     try {
       adminEmail = row.admin_email_ciphertext
         ? decryptSecret(row.admin_email_ciphertext, this.masterKey)
@@ -65,8 +65,7 @@ export class SettingsService {
           decryptSecret(row.admin_password_ciphertext, this.masterKey),
       );
     } catch {
-      adminEmail = '';
-      passwordConfigured = false;
+      throw new SettingsError('DECRYPT_FAILED', '主服务管理员凭据解密失败');
     }
 
     return {
@@ -81,18 +80,25 @@ export class SettingsService {
   }
 
   save(input: SaveMainServiceSettingsInput): MainServiceSettingsView {
-    const baseUrl = normalizeBaseUrl(input.baseUrl);
+    const existing = this.readRow();
+    const baseUrl = normalizeBaseUrl(input.baseUrl ?? existing?.base_url ?? '');
     if (!baseUrl) {
       throw new SettingsError('INVALID_INPUT', 'baseUrl 无效');
     }
 
-    const existing = this.readRow();
     const adminEmail = input.adminEmail?.trim().toLowerCase();
     const adminPassword = input.adminPassword;
     let emailCiphertext = existing?.admin_email_ciphertext ?? '';
     let passwordCiphertext = existing?.admin_password_ciphertext ?? '';
     let credentialVersion = existing?.credential_version ?? 0;
     let configurationChanged = baseUrl !== existing?.base_url;
+
+    if (existing && !adminEmail) {
+      this.decryptExistingField(existing.admin_email_ciphertext);
+    }
+    if (existing && !adminPassword) {
+      this.decryptExistingField(existing.admin_password_ciphertext);
+    }
 
     if (adminEmail) {
       if (!isEmail(adminEmail)) {
@@ -113,40 +119,29 @@ export class SettingsService {
     }
 
     const now = Date.now();
-    if (existing) {
-      this.sqlite
-        .prepare(
-          `UPDATE main_service_settings
-           SET base_url = ?, admin_email_ciphertext = ?, admin_password_ciphertext = ?,
-               credential_version = ?, updated_by = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          baseUrl,
-          emailCiphertext,
-          passwordCiphertext,
-          credentialVersion,
-          input.updatedBy ?? null,
-          now,
-          existing.id,
-        );
-    } else {
-      this.sqlite
-        .prepare(
-          `INSERT INTO main_service_settings
-           (base_url, api_key_ciphertext, key_version, admin_email_ciphertext,
-            admin_password_ciphertext, credential_version, updated_by, updated_at)
-           VALUES (?, '', 1, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          baseUrl,
-          emailCiphertext,
-          passwordCiphertext,
-          credentialVersion,
-          input.updatedBy ?? null,
-          now,
-        );
-    }
+    this.sqlite
+      .prepare(
+        `INSERT INTO main_service_settings
+         (id, base_url, api_key_ciphertext, key_version, admin_email_ciphertext,
+          admin_password_ciphertext, credential_version, updated_by, updated_at)
+         VALUES (1, ?, '', 1, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           base_url = excluded.base_url,
+           admin_email_ciphertext = excluded.admin_email_ciphertext,
+           admin_password_ciphertext = excluded.admin_password_ciphertext,
+           credential_version = main_service_settings.credential_version + ?,
+           updated_by = excluded.updated_by,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        baseUrl,
+        emailCiphertext,
+        passwordCiphertext,
+        credentialVersion,
+        input.updatedBy ?? null,
+        now,
+        configurationChanged ? 1 : 0,
+      );
 
     return this.getView();
   }
@@ -166,6 +161,11 @@ export class SettingsService {
     } catch {
       throw new SettingsError('DECRYPT_FAILED', '主服务管理员凭据解密失败');
     }
+  }
+
+  hasStoredCredentials(): boolean {
+    const row = this.readRow();
+    return Boolean(row?.admin_email_ciphertext && row.admin_password_ciphertext);
   }
 
   async testConnection(overrides?: {
@@ -205,10 +205,18 @@ export class SettingsService {
         `SELECT id, base_url, admin_email_ciphertext, admin_password_ciphertext,
                 credential_version, updated_by, updated_at
          FROM main_service_settings
-         ORDER BY id ASC
-         LIMIT 1`,
+         WHERE id = 1`,
       )
       .get() as SettingsRow | undefined;
+  }
+
+  private decryptExistingField(ciphertext: string): void {
+    if (!ciphertext) return;
+    try {
+      decryptSecret(ciphertext, this.masterKey);
+    } catch {
+      throw new SettingsError('DECRYPT_FAILED', '主服务管理员凭据解密失败');
+    }
   }
 }
 
@@ -236,7 +244,22 @@ function emptyView(): MainServiceSettingsView {
 
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
-  return /^https?:\/\//i.test(trimmed) ? trimmed : '';
+  try {
+    const url = new URL(trimmed);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      return '';
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
 }
 
 function isEmail(value: string): boolean {

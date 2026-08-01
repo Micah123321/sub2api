@@ -146,7 +146,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Icon from '@/components/common/Icon.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { validateOpenAIApiKey } from '@/api/admin/groups'
 
 interface Props {

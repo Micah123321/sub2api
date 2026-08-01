@@ -33,6 +33,7 @@ export class SyncService {
   constructor(
     private readonly sqlite: Database.Database,
     private readonly settings: SettingsService,
+    private readonly createClient = createMainServiceClient,
     private readonly staleAfterMs = 5 * 60 * 1000,
   ) {}
 
@@ -41,7 +42,7 @@ export class SyncService {
     if (this.remoteClient?.credentialVersion === credentials.credentialVersion) {
       return this.remoteClient.client;
     }
-    const client = createMainServiceClient(
+    const client = this.createClient(
       credentials.baseUrl,
       credentials.adminEmail,
       credentials.adminPassword,

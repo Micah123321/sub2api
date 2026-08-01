@@ -43,7 +43,7 @@
           <button
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800"
             :title="isDark ? t('home.switchToLight') : t('home.switchToDark')"
-            @click="toggleTheme"
+            @click="toggleColorMode"
           >
             <Icon v-if="isDark" name="sun" size="md" />
             <Icon v-else name="moon" size="md" />
@@ -496,6 +496,8 @@ const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
+const hasHomeContent = computed(() => homeContent.value.trim().length > 0)
+const compactHomeEnabled = computed(() => appStore.cachedPublicSettings?.compact_home_enabled === true)
 const apiBaseUrl = computed(() => {
   const configured = appStore.cachedPublicSettings?.api_base_url || appStore.apiBaseUrl || ''
   const origin = typeof window !== 'undefined' ? window.location.origin : ''

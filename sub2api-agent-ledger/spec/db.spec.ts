@@ -5,6 +5,7 @@ import {
   MIGRATION_ADMIN_LOGIN_ID,
   MIGRATION_ID,
   MIGRATION_PAID_CARD_ISSUE_ID,
+  MIGRATION_SETTINGS_SINGLETON_ID,
   MIGRATION_USAGE_MICRO_ID,
 } from '../apps/server/src/db/migrate';
 
@@ -17,6 +18,7 @@ describe('sqlite migrations', () => {
       MIGRATION_USAGE_MICRO_ID,
       MIGRATION_PAID_CARD_ISSUE_ID,
       MIGRATION_ADMIN_LOGIN_ID,
+      MIGRATION_SETTINGS_SINGLETON_ID,
     ]);
     const second = runMigrations(sqlite);
     expect(second.applied).toEqual([]);
@@ -94,6 +96,7 @@ describe('sqlite migrations', () => {
       MIGRATION_USAGE_MICRO_ID,
       MIGRATION_PAID_CARD_ISSUE_ID,
       MIGRATION_ADMIN_LOGIN_ID,
+      MIGRATION_SETTINGS_SINGLETON_ID,
     ]);
 
     const columns = (
@@ -122,6 +125,14 @@ describe('sqlite migrations', () => {
         'credential_version',
       ]),
     );
+    expect(() =>
+      sqlite
+        .prepare(
+          `INSERT INTO main_service_settings
+           (id, base_url, api_key_ciphertext, updated_at) VALUES (2, 'https://x', '', ?)`,
+        )
+        .run(Date.now()),
+    ).toThrow();
 
     // 重建后唯一索引必须仍然存在，否则同步的 ON CONFLICT 会退化成重复插入。
     const indexes = (

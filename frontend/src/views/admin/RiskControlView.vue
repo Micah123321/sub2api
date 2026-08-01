@@ -1178,7 +1178,7 @@ import type {
   UpdateContentModerationConfig,
 } from '@/api/admin/riskControl'
 import { DEFAULT_CONTENT_MODERATION_AUDIT_PROMPT } from '@/api/admin/riskControl'
-import type { AdminGroup, SelectOption } from '@/types'
+import type { AdminGroup, Proxy, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'

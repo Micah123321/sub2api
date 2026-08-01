@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const mainServiceEnvelopeSchema = z.object({
   code: z.union([z.number(), z.string()]),
   message: z.string().optional(),
+  reason: z.string().optional(),
   data: z.unknown().optional(),
 });
 

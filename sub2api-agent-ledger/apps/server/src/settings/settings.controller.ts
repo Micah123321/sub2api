@@ -61,7 +61,7 @@ export class SettingsController {
 
     try {
       const view = this.settings.save({
-        baseUrl: body.baseUrl ?? '',
+        baseUrl: body.baseUrl,
         adminEmail: body.adminEmail,
         adminPassword: body.adminPassword,
         updatedBy: request.auth?.userId ?? null,

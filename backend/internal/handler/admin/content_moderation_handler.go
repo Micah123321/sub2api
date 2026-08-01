@@ -26,6 +26,7 @@ type contentModerationConfigRequest struct {
 	AuditPrompt          *string             `json:"audit_prompt"`
 	BaseURL              *string             `json:"base_url"`
 	Model                *string             `json:"model"`
+	ProxyID              *int64              `json:"proxy_id"`
 	APIKey               *string             `json:"api_key"`
 	APIKeys              *[]string           `json:"api_keys"`
 	APIKeysMode          string              `json:"api_keys_mode"`
@@ -64,6 +65,7 @@ type contentModerationAPIKeyTestRequest struct {
 	TimeoutMS   int      `json:"timeout_ms"`
 	AuditEngine string   `json:"audit_engine"`
 	AuditPrompt string   `json:"audit_prompt"`
+	ProxyID     *int64   `json:"proxy_id"`
 	Prompt      string   `json:"prompt"`
 	Images      []string `json:"images"`
 }
@@ -143,6 +145,7 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 		TimeoutMS:   req.TimeoutMS,
 		AuditEngine: req.AuditEngine,
 		AuditPrompt: req.AuditPrompt,
+		ProxyID:     req.ProxyID,
 		Prompt:      req.Prompt,
 		Images:      req.Images,
 	})

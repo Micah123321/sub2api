@@ -51,7 +51,7 @@ describe('integration: remote client and security', () => {
     };
 
     const client = new MainServiceClient({
-      baseUrl: 'http://main.local',
+      baseUrl: 'https://main.local',
       adminEmail: 'admin@example.com',
       adminPassword: 'secret',
       fetchImpl,
@@ -63,6 +63,7 @@ describe('integration: remote client and security', () => {
     expect(new Headers(requests[1].init?.headers).get('authorization')).toBe(
       'Bearer jwt-admin',
     );
+    expect(requests[0].init?.redirect).toBe('manual');
 
     let loginCount = 0;
     const unauthorizedFetch: typeof fetch = async (input) => {
@@ -80,7 +81,7 @@ describe('integration: remote client and security', () => {
       return new Response(JSON.stringify({ code: 401, message: 'no' }), { status: 401 });
     };
     const badClient = new MainServiceClient({
-      baseUrl: 'http://main.local',
+      baseUrl: 'https://main.local',
       adminEmail: 'admin@example.com',
       adminPassword: 'secret',
       fetchImpl: unauthorizedFetch,
@@ -91,7 +92,7 @@ describe('integration: remote client and security', () => {
 
   it('rejects 2FA and non-admin main-service logins', async () => {
     const twoFactorClient = new MainServiceClient({
-      baseUrl: 'http://main.local',
+      baseUrl: 'https://main.local',
       adminEmail: 'admin@example.com',
       adminPassword: 'secret',
       fetchImpl: async () =>
@@ -105,7 +106,7 @@ describe('integration: remote client and security', () => {
     });
 
     const userClient = new MainServiceClient({
-      baseUrl: 'http://main.local',
+      baseUrl: 'https://main.local',
       adminEmail: 'user@example.com',
       adminPassword: 'secret',
       fetchImpl: async () =>
@@ -118,6 +119,163 @@ describe('integration: remote client and security', () => {
         ),
     });
     await expect(userClient.listUsers()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('protects admin credentials in transit and diagnoses Turnstile', async () => {
+    expect(
+      () =>
+        new MainServiceClient({
+          baseUrl: 'http://main.example.com',
+          adminEmail: 'admin@example.com',
+          adminPassword: 'secret',
+        }),
+    ).toThrow('HTTPS');
+    expect(
+      () =>
+        new MainServiceClient({
+          baseUrl: 'http://127.0.0.1:8080',
+          adminEmail: 'admin@example.com',
+          adminPassword: 'secret',
+        }),
+    ).not.toThrow();
+    expect(
+      () =>
+        new MainServiceClient({
+          baseUrl: 'http://host.docker.internal:8080',
+          adminEmail: 'admin@example.com',
+          adminPassword: 'secret',
+        }),
+    ).toThrow('HTTPS');
+    expect(
+      () =>
+        new MainServiceClient({
+          baseUrl: 'ftp://main.example.com',
+          adminEmail: 'admin@example.com',
+          adminPassword: 'secret',
+          allowInsecureHttp: true,
+        }),
+    ).toThrow('HTTP');
+
+    const turnstileClient = new MainServiceClient({
+      baseUrl: 'http://main.example.com',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      allowInsecureHttp: true,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            code: 400,
+            reason: 'TURNSTILE_VERIFICATION_FAILED',
+            message: 'turnstile verification failed',
+          }),
+          { status: 400 },
+        ),
+    });
+    await expect(turnstileClient.listUsers()).rejects.toMatchObject({
+      code: 'TURNSTILE_REQUIRED',
+    });
+  });
+
+  it('shares concurrent logins and rejects redirects', async () => {
+    let loginCount = 0;
+    let expireFirstToken = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (String(input).endsWith('/api/v1/auth/login')) {
+        loginCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: { access_token: `jwt-${loginCount}`, user: { role: 'admin' } },
+          }),
+          { status: 200 },
+        );
+      }
+      if (
+        expireFirstToken &&
+        new Headers(init?.headers).get('authorization') === 'Bearer jwt-1'
+      ) {
+        return new Response(JSON.stringify({ code: 401, message: 'expired' }), {
+          status: 401,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { items: [], total: 0, page: 1, page_size: 20 },
+        }),
+        { status: 200 },
+      );
+    };
+    const client = new MainServiceClient({
+      baseUrl: 'https://main.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      fetchImpl,
+    });
+    await Promise.all([client.listUsers(), client.listUsers(), client.listUsers()]);
+    expect(loginCount).toBe(1);
+    expireFirstToken = true;
+    await Promise.all([client.listUsers(), client.listUsers()]);
+    expect(loginCount).toBe(2);
+
+    const redirectClient = new MainServiceClient({
+      baseUrl: 'https://main.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      fetchImpl: async () =>
+        new Response(null, {
+          status: 307,
+          headers: { location: 'https://attacker.example/login' },
+        }),
+    });
+    await expect(redirectClient.listUsers()).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+
+    let maliciousRequestSent = false;
+    const pathClient = new MainServiceClient({
+      baseUrl: 'https://main.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      fetchImpl: async (input) => {
+        if (String(input).endsWith('/api/v1/auth/login')) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: { access_token: 'jwt-path', user: { role: 'admin' } },
+            }),
+            { status: 200 },
+          );
+        }
+        maliciousRequestSent = true;
+        return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 });
+      },
+    });
+    await expect(pathClient.getUser('../../auth/login')).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(maliciousRequestSent).toBe(false);
+
+    const prefixedRequests: string[] = [];
+    const prefixedClient = new MainServiceClient({
+      baseUrl: 'https://main.local/sub2api',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      fetchImpl: async (input) => {
+        prefixedRequests.push(String(input));
+        return new Response(
+          JSON.stringify(
+            prefixedRequests.length === 1
+              ? { code: 0, data: { access_token: 'jwt-prefix', user: { role: 'admin' } } }
+              : { code: 0, data: { items: [], total: 0, page: 1, page_size: 20 } },
+          ),
+          { status: 200 },
+        );
+      },
+    });
+    await prefixedClient.listUsers();
+    expect(prefixedRequests[0]).toBe('https://main.local/sub2api/api/v1/auth/login');
   });
 
   it('supports batch bind conflict and transfer semantics', () => {

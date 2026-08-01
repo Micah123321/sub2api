@@ -144,6 +144,7 @@ type ContentModerationConfig struct {
 	AuditPrompt          string                       `json:"audit_prompt"`
 	BaseURL              string                       `json:"base_url"`
 	Model                string                       `json:"model"`
+	ProxyID              *int64                       `json:"proxy_id,omitempty"`
 	APIKey               string                       `json:"api_key,omitempty"`
 	APIKeys              []string                     `json:"api_keys,omitempty"`
 	TimeoutMS            int                          `json:"timeout_ms"`
@@ -245,6 +246,7 @@ type TestContentModerationAPIKeysInput struct {
 	BaseURL     string   `json:"base_url"`
 	Model       string   `json:"model"`
 	TimeoutMS   int      `json:"timeout_ms"`
+	ProxyID     *int64   `json:"proxy_id"`
 	AuditEngine string   `json:"audit_engine"`
 	AuditPrompt string   `json:"audit_prompt"`
 	Prompt      string   `json:"prompt"`
@@ -276,6 +278,7 @@ type UpdateContentModerationConfigInput struct {
 	AuditPrompt                    *string                       `json:"audit_prompt"`
 	BaseURL                        *string                       `json:"base_url"`
 	Model                          *string                       `json:"model"`
+	ProxyID                        *int64                        `json:"proxy_id"`
 	APIKey                         *string                       `json:"api_key"`
 	APIKeys                        *[]string                     `json:"api_keys"`
 	APIKeysMode                    string                        `json:"api_keys_mode"`

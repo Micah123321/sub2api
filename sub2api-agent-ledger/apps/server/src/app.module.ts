@@ -45,12 +45,26 @@ const authService = new AuthService(
 );
 const auditService = new AuditService(sqlite);
 const ledgerService = new LedgerService(sqlite);
-const settingsService = new SettingsService(sqlite, masterKey, createMainServiceClient);
+const allowInsecureMainServiceHttp =
+  process.env.MAIN_SERVICE_ALLOW_INSECURE_HTTP?.trim().toLowerCase() === 'true';
+const createConfiguredMainServiceClient = (
+  baseUrl: string,
+  adminEmail: string,
+  adminPassword: string,
+) =>
+  createMainServiceClient(
+    baseUrl,
+    adminEmail,
+    adminPassword,
+    undefined,
+    allowInsecureMainServiceHttp,
+  );
+const settingsService = new SettingsService(sqlite, masterKey, createConfiguredMainServiceClient);
 const mainServiceBaseUrl = process.env.MAIN_SERVICE_BASE_URL?.trim();
 const mainServiceAdminEmail = process.env.MAIN_SERVICE_ADMIN_EMAIL?.trim();
 const mainServiceAdminPassword = process.env.MAIN_SERVICE_ADMIN_PASSWORD;
 if (
-  !settingsService.getView().configured &&
+  !settingsService.hasStoredCredentials() &&
   mainServiceBaseUrl &&
   mainServiceAdminEmail &&
   mainServiceAdminPassword
@@ -62,7 +76,7 @@ if (
     updatedBy: 'environment-bootstrap',
   });
 }
-const syncService = new SyncService(sqlite, settingsService);
+const syncService = new SyncService(sqlite, settingsService, createConfiguredMainServiceClient);
 const agentsService = new AgentsService(sqlite, ledgerService, userRepository, sessionStore);
 const assignmentsService = new AssignmentsService(sqlite);
 const cardsService = new CardsService(sqlite, ledgerService);

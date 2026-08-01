@@ -63,6 +63,59 @@ describe('main-service settings', () => {
       adminEmail: 'admin@example.com',
       adminPassword: 'password-1',
     });
+
+    const passwordOnly = service.save({ adminPassword: 'password-2' });
+    expect(passwordOnly.credentialVersion).toBe(3);
+    expect(service.getCredentials()).toMatchObject({
+      baseUrl: 'http://main-2.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'password-2',
+    });
+  });
+
+  it('surfaces damaged credentials and keeps the settings singleton', () => {
+    const sqlite = new Database(':memory:');
+    runMigrations(sqlite);
+    const key = resolveMasterKey(Buffer.alloc(32, 4).toString('base64'));
+    const service = new SettingsService(sqlite, key, (baseUrl, email, password) =>
+      new MainServiceClient({
+        baseUrl,
+        adminEmail: email,
+        adminPassword: password,
+        allowInsecureHttp: true,
+      }),
+    );
+    service.save({
+      baseUrl: 'http://main.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'password-1',
+    });
+
+    const wrongKeyService = new SettingsService(
+      sqlite,
+      resolveMasterKey(Buffer.alloc(32, 8).toString('base64')),
+      () => ({}) as MainServiceClient,
+    );
+    expect(wrongKeyService.hasStoredCredentials()).toBe(true);
+    expect(() => wrongKeyService.getView()).toThrow('凭据解密失败');
+    expect(() => wrongKeyService.save({ adminPassword: 'replacement' })).toThrow(
+      '凭据解密失败',
+    );
+    const recovered = wrongKeyService.save({
+      baseUrl: 'https://main.example.com',
+      adminEmail: 'replacement@example.com',
+      adminPassword: 'replacement-password',
+    });
+    expect(recovered).toMatchObject({ configured: true, credentialVersion: 2 });
+    expect(wrongKeyService.getCredentials()).toMatchObject({
+      adminEmail: 'replacement@example.com',
+      adminPassword: 'replacement-password',
+    });
+    expect(
+      (sqlite.prepare('SELECT COUNT(*) AS total FROM main_service_settings').get() as {
+        total: number;
+      }).total,
+    ).toBe(1);
   });
 
   it('tests an unsaved override without returning credentials', async () => {

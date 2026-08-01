@@ -123,6 +123,7 @@ func TestContentModerationTestAPIKeysRejectsUnsafeBaseURL(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	_, err := svc.TestAPIKeys(context.Background(), TestContentModerationAPIKeysInput{

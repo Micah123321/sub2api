@@ -25,7 +25,7 @@ export const pluginUsers = sqliteTable(
 );
 
 export const mainServiceSettings = sqliteTable('main_service_settings', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+  id: integer('id').primaryKey(),
   baseUrl: text('base_url').notNull(),
   apiKeyCiphertext: text('api_key_ciphertext').notNull(),
   keyVersion: integer('key_version').notNull().default(1),

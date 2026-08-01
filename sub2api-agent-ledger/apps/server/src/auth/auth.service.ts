@@ -46,14 +46,11 @@ export class AuthService {
     this.cookieOptions = {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: resolveSessionCookieSecure(),
       path: '/',
       maxAge: Math.floor(this.sessionTtlMs / 1000),
       ...options.cookie,
     };
-    if (process.env.NODE_ENV === 'production') {
-      this.cookieOptions.secure = true;
-    }
     this.sessionStore = options.sessionStore ?? new SessionStore();
   }
 
@@ -139,4 +136,15 @@ function toSessionUser(user: AuthUser): SessionUser {
     role: user.role,
     agentId,
   };
+}
+
+function resolveSessionCookieSecure(): boolean {
+  const configured = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
+  if (configured === 'true') {
+    return true;
+  }
+  if (configured === 'false') {
+    return false;
+  }
+  return process.env.NODE_ENV === 'production';
 }

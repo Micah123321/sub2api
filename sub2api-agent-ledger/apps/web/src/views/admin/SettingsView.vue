@@ -109,7 +109,7 @@ onMounted(load);
           <input
             v-model="adminPassword"
             type="password"
-            autocomplete="current-password"
+            autocomplete="new-password"
             placeholder="输入主服务管理员密码"
           />
         </label>

@@ -76,6 +76,40 @@ describe('auth foundation', () => {
     ).rejects.toMatchObject({ code: 'ACCOUNT_DISABLED' });
   });
 
+  it('honors the explicit session cookie security setting', async () => {
+    const passwordHash = await hashPassword('secret');
+    const user: AuthUser = {
+      id: 'admin-1',
+      username: 'admin',
+      passwordHash,
+      role: 'ADMIN',
+      status: 'ACTIVE',
+    };
+    const previous = process.env.SESSION_COOKIE_SECURE;
+
+    try {
+      process.env.SESSION_COOKIE_SECURE = 'false';
+      const httpService = new AuthService((username) =>
+        username === user.username ? user : null,
+      );
+      const httpResult = await httpService.login({ username: 'admin', password: 'secret' });
+      expect(httpResult.cookie.options.secure).toBe(false);
+
+      process.env.SESSION_COOKIE_SECURE = 'true';
+      const httpsService = new AuthService((username) =>
+        username === user.username ? user : null,
+      );
+      const httpsResult = await httpsService.login({ username: 'admin', password: 'secret' });
+      expect(httpsResult.cookie.options.secure).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.SESSION_COOKIE_SECURE;
+      } else {
+        process.env.SESSION_COOKIE_SECURE = previous;
+      }
+    }
+  });
+
   it('uses the session agentId for agent scope decisions', () => {
     const agent: SessionUser = {
       userId: 'agent-user',
