@@ -14,6 +14,7 @@ const {
   listLogs,
   testAPIKeys,
   getGroups,
+  getProxies,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const {
   listLogs: vi.fn(),
   testAPIKeys: vi.fn(),
   getGroups: vi.fn(),
+  getProxies: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -41,6 +43,9 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getGroups,
+    },
+    proxies: {
+      getAll: getProxies,
     },
   },
 }))
@@ -78,6 +83,7 @@ const baseConfig = (): ContentModerationConfig => ({
   audit_prompt: 'default audit prompt',
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
+  proxy_id: null,
   api_key_configured: false,
   api_key_masked: '',
   api_key_count: 0,
@@ -206,6 +212,7 @@ describe('admin RiskControlView', () => {
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 1 })
     testAPIKeys.mockResolvedValue({ items: [], image_count: 0 })
     getGroups.mockResolvedValue([])
+    getProxies.mockResolvedValue([])
     updateConfig.mockImplementation(async (payload: UpdateContentModerationConfig) => ({
       ...baseConfig(),
       ...payload,
@@ -229,6 +236,7 @@ describe('admin RiskControlView', () => {
           Toggle: true,
           Pagination: true,
           ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
         },
       },
     })
@@ -262,6 +270,7 @@ describe('admin RiskControlView', () => {
           Toggle: true,
           Pagination: true,
           ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
         },
       },
     })
@@ -393,6 +402,7 @@ describe('admin RiskControlView', () => {
           Toggle: true,
           Pagination: true,
           ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
         },
       },
     })
@@ -460,6 +470,7 @@ describe('admin RiskControlView', () => {
           Toggle: true,
           Pagination: true,
           ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
         },
       },
     })

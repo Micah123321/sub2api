@@ -94,6 +94,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		AuditPrompt:                    req.AuditPrompt,
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
+		ProxyID:                        req.ProxyID,
 		APIKey:                         req.APIKey,
 		APIKeys:                        req.APIKeys,
 		APIKeysMode:                    req.APIKeysMode,
