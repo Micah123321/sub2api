@@ -46,27 +46,25 @@ LABEL org.opencontainers.image.source="https://github.com/Micah123321/sub2api"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates tini curl \
-  && rm -rf /var/lib/apt/lists/* \
-  && groupadd --gid 1000 ledger \
-  && useradd --uid 1000 --gid ledger --shell /bin/bash --create-home ledger
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder --chown=ledger:ledger /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
-COPY --from=builder --chown=ledger:ledger /app/node_modules ./node_modules
-COPY --from=builder --chown=ledger:ledger /app/dist ./dist
-COPY --chown=ledger:ledger deploy/agent-ledger/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --from=builder --chown=node:node /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --chown=node:node deploy/agent-ledger/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
   && mkdir -p /app/data \
-  && chown -R ledger:ledger /app/data
+  && chown -R node:node /app/data
 
 ENV NODE_ENV=production \
     PORT=4173 \
     PLUGIN_DATA_DIR=/app/data \
     CORS_ORIGINS=http://localhost:4173,http://127.0.0.1:4173
 
-USER ledger
+USER node
 EXPOSE 4173
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
