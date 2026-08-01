@@ -28,6 +28,8 @@ export interface CachedRemoteUser {
 }
 
 export class SyncService {
+  private remoteClient: { credentialVersion: number; client: MainServiceClient } | null = null;
+
   constructor(
     private readonly sqlite: Database.Database,
     private readonly settings: SettingsService,
@@ -36,7 +38,16 @@ export class SyncService {
 
   private client(): MainServiceClient {
     const credentials = this.settings.getCredentials();
-    return createMainServiceClient(credentials.baseUrl, credentials.apiKey);
+    if (this.remoteClient?.credentialVersion === credentials.credentialVersion) {
+      return this.remoteClient.client;
+    }
+    const client = createMainServiceClient(
+      credentials.baseUrl,
+      credentials.adminEmail,
+      credentials.adminPassword,
+    );
+    this.remoteClient = { credentialVersion: credentials.credentialVersion, client };
+    return client;
   }
 
   listCachedUsers(options: { search?: string; limit?: number } = {}): CachedRemoteUser[] {

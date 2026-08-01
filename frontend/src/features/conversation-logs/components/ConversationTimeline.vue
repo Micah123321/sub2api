@@ -15,7 +15,7 @@
         </dl>
         <div v-if="detail.truncated || detail.status === 'partial'" role="status" class="mt-3 flex items-center gap-2 border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"><Icon name="exclamationTriangle" size="sm" />{{ labels.truncated }}</div>
       </header>
-      <div class="timeline px-4 py-5 sm:px-6">
+      <div class="timeline max-h-[600px] overflow-y-auto px-4 py-5 sm:px-6">
         <article v-for="block in blocks" :key="block.id" class="timeline-row" :class="`role-${block.role}`">
           <div class="role-label">{{ roleLabel(block.role) }}</div>
           <div class="min-w-0 flex-1 pb-6 pl-4">

@@ -28,8 +28,8 @@ const mountFilters = (filters: Record<string, unknown>) => mount(AccountTableFil
 })
 
 describe('AccountTableFilters plan type filter', () => {
-  it('shows the complete plan list for OpenAI and emits plan_type updates', async () => {
-    const wrapper = mountFilters({ platform: 'openai', plan_type: '' })
+  it('is always visible and selects OpenAI when applying a plan type', async () => {
+    const wrapper = mountFilters({ platform: '', plan_type: '' })
     const planFilter = wrapper.findAllComponents(SelectStub)
       .find(select => select.attributes('data-test') === 'plan-type-filter')
 
@@ -45,7 +45,10 @@ describe('AccountTableFilters plan type filter', () => {
     expect(planFilter?.props('ariaLabel')).toBe('admin.accounts.planTypeFilterLabel')
 
     await planFilter?.trigger('click')
-    expect(wrapper.emitted('update:filters')?.at(-1)?.[0]).toMatchObject({ plan_type: 'team' })
+    expect(wrapper.emitted('update:filters')?.at(-1)?.[0]).toMatchObject({
+      platform: 'openai',
+      plan_type: 'team'
+    })
   })
 
   it('clears plan_type when platform changes away from OpenAI', async () => {
@@ -61,6 +64,6 @@ describe('AccountTableFilters plan type filter', () => {
     })
 
     await wrapper.setProps({ filters: { platform: 'anthropic', plan_type: '' } })
-    expect(wrapper.find('[data-test="plan-type-filter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="plan-type-filter"]').exists()).toBe(true)
   })
 })

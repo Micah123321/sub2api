@@ -10,7 +10,6 @@
     <Select :model-value="filters.platform" class="w-40" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
     <Select :model-value="filters.type" class="w-40" :options="tOpts" @update:model-value="updateType" @change="$emit('change')" />
     <Select
-      v-if="showPlanTypeFilter"
       data-test="plan-type-filter"
       :model-value="filters.plan_type"
       class="w-40"
@@ -38,13 +37,18 @@ const updatePlatform = (value: string | number | boolean | null) => {
   })
 }
 const updateType = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, type: value }) }
-const updatePlanType = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, plan_type: value }) }
+const updatePlanType = (value: string | number | boolean | null) => {
+  emit('update:filters', {
+    ...props.filters,
+    platform: value ? 'openai' : props.filters.platform,
+    plan_type: value
+  })
+}
 const updateStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, status: value }) }
 const updatePrivacyMode = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, privacy_mode: value }) }
 const updateGroup = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, group: value }) }
 const pOpts = computed(() => [{ value: '', label: t('admin.accounts.allPlatforms') }, { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }, { value: 'gemini', label: 'Gemini' }, { value: 'antigravity', label: 'Antigravity' }, { value: 'grok', label: 'Grok' }])
 const tOpts = computed(() => [{ value: '', label: t('admin.accounts.allTypes') }, { value: 'oauth', label: t('admin.accounts.oauthType') }, { value: 'setup-token', label: t('admin.accounts.setupToken') }, { value: 'apikey', label: t('admin.accounts.apiKey') }, { value: 'bedrock', label: 'AWS Bedrock' }])
-const showPlanTypeFilter = computed(() => props.filters.platform === 'openai')
 const planTypeOpts = computed(() => [
   { value: '', label: t('admin.accounts.allPlanTypes') },
   { value: 'k12', label: 'K12' },

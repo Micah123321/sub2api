@@ -1,5 +1,6 @@
 import {
   mainServiceEnvelopeSchema,
+  mainServiceLoginSchema,
   mainServicePaginatedSchema,
   mainServiceUsageLogSchema,
   mainServiceUserSchema,
@@ -16,7 +17,8 @@ export type RemoteErrorCode =
   | 'RATE_LIMITED'
   | 'INVALID_RESPONSE'
   | 'SERVER_ERROR'
-  | 'NOT_FOUND';
+  | 'NOT_FOUND'
+  | 'TWO_FACTOR_REQUIRED';
 
 export class RemoteError extends Error {
   constructor(
@@ -59,7 +61,8 @@ export interface ListUsageParams {
 
 export interface MainServiceClientOptions {
   baseUrl: string;
-  apiKey: string;
+  adminEmail: string;
+  adminPassword: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -72,13 +75,16 @@ const ALLOWED_PATHS = new Set([
 
 export class MainServiceClient {
   private readonly baseUrl: string;
-  private readonly apiKey: string;
+  private readonly adminEmail: string;
+  private readonly adminPassword: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private accessToken: string | null = null;
 
   constructor(options: MainServiceClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
-    this.apiKey = options.apiKey;
+    this.adminEmail = options.adminEmail;
+    this.adminPassword = options.adminPassword;
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -200,59 +206,74 @@ export class MainServiceClient {
       throw new RemoteError('FORBIDDEN', `未登记的远程路径: ${path}`);
     }
 
+    let token = await this.getAccessToken();
+    let response = await this.request(pathWithQuery, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: 'application/json',
+      },
+    });
+
+    if (response.status === 401) {
+      this.accessToken = null;
+      token = await this.getAccessToken();
+      response = await this.request(pathWithQuery, {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/json',
+        },
+      });
+    }
+
+    return this.parseEnvelope(response);
+  }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken) {
+      return this.accessToken;
+    }
+
+    const response = await this.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        email: this.adminEmail,
+        password: this.adminPassword,
+      }),
+    });
+    const payload = await this.parseEnvelope(response);
+    const login = mainServiceLoginSchema.safeParse(payload);
+    if (!login.success) {
+      throw new RemoteError('INVALID_RESPONSE', '主服务登录响应无效', response.status);
+    }
+    if ('requires_2fa' in login.data) {
+      throw new RemoteError(
+        'TWO_FACTOR_REQUIRED',
+        '主服务管理员已启用两步验证，无法仅使用邮箱和密码登录',
+        response.status,
+      );
+    }
+    if (login.data.user.role.toLowerCase() !== 'admin') {
+      throw new RemoteError('FORBIDDEN', '配置的主服务账号不是管理员', 403);
+    }
+
+    this.accessToken = login.data.access_token;
+    return this.accessToken;
+  }
+
+  private async request(pathWithQuery: string, init: RequestInit): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}${pathWithQuery}`, {
-        method: 'GET',
-        headers: {
-          'x-api-key': this.apiKey,
-          accept: 'application/json',
-        },
+      return await this.fetchImpl(`${this.baseUrl}${pathWithQuery}`, {
+        ...init,
         signal: controller.signal,
       });
-
-      if (response.status === 401) {
-        throw new RemoteError('UNAUTHORIZED', '主服务认证失败', 401);
-      }
-      if (response.status === 403) {
-        throw new RemoteError('FORBIDDEN', '主服务拒绝访问', 403);
-      }
-      if (response.status === 404) {
-        throw new RemoteError('NOT_FOUND', '主服务资源不存在', 404);
-      }
-      if (response.status === 429) {
-        throw new RemoteError('RATE_LIMITED', '主服务限流', 429);
-      }
-      if (response.status >= 500) {
-        throw new RemoteError('SERVER_ERROR', `主服务错误 ${response.status}`, response.status);
-      }
-      if (!response.ok) {
-        throw new RemoteError('INVALID_RESPONSE', `主服务响应异常 ${response.status}`, response.status);
-      }
-
-      let json: unknown;
-      try {
-        json = await response.json();
-      } catch {
-        throw new RemoteError('INVALID_RESPONSE', '主服务返回了非 JSON 响应', response.status);
-      }
-
-      const envelope = mainServiceEnvelopeSchema.safeParse(json);
-      if (!envelope.success) {
-        throw new RemoteError('INVALID_RESPONSE', '主服务响应 envelope 无效', response.status);
-      }
-
-      const code = envelope.data.code;
-      if (typeof code === 'number' && code !== 0) {
-        throw new RemoteError(
-          'INVALID_RESPONSE',
-          envelope.data.message || `主服务业务错误 code=${code}`,
-          response.status,
-        );
-      }
-
-      return envelope.data.data;
     } catch (error) {
       if (error instanceof RemoteError) {
         throw error;
@@ -268,12 +289,57 @@ export class MainServiceClient {
       clearTimeout(timer);
     }
   }
+
+  private async parseEnvelope(response: Response): Promise<unknown> {
+    if (response.status === 401) {
+      throw new RemoteError('UNAUTHORIZED', '主服务认证失败', 401);
+    }
+    if (response.status === 403) {
+      throw new RemoteError('FORBIDDEN', '主服务拒绝访问', 403);
+    }
+    if (response.status === 404) {
+      throw new RemoteError('NOT_FOUND', '主服务资源不存在', 404);
+    }
+    if (response.status === 429) {
+      throw new RemoteError('RATE_LIMITED', '主服务限流', 429);
+    }
+    if (response.status >= 500) {
+      throw new RemoteError('SERVER_ERROR', `主服务错误 ${response.status}`, response.status);
+    }
+    if (!response.ok) {
+      throw new RemoteError('INVALID_RESPONSE', `主服务响应异常 ${response.status}`, response.status);
+    }
+
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new RemoteError('INVALID_RESPONSE', '主服务返回了非 JSON 响应', response.status);
+    }
+
+    const envelope = mainServiceEnvelopeSchema.safeParse(json);
+    if (!envelope.success) {
+      throw new RemoteError('INVALID_RESPONSE', '主服务响应 envelope 无效', response.status);
+    }
+
+    const code = String(envelope.data.code);
+    if (code !== '0') {
+      throw new RemoteError(
+        'INVALID_RESPONSE',
+        envelope.data.message || `主服务业务错误 code=${code}`,
+        response.status,
+      );
+    }
+
+    return envelope.data.data;
+  }
 }
 
 export function createMainServiceClient(
   baseUrl: string,
-  apiKey: string,
+  adminEmail: string,
+  adminPassword: string,
   fetchImpl?: typeof fetch,
 ): MainServiceClient {
-  return new MainServiceClient({ baseUrl, apiKey, fetchImpl });
+  return new MainServiceClient({ baseUrl, adminEmail, adminPassword, fetchImpl });
 }

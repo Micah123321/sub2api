@@ -473,6 +473,24 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+/**
+ * Validate OpenAI API Key
+ * @param apiKey - OpenAI API Key to validate
+ * @returns Validation result with available models
+ */
+export async function validateOpenAIApiKey(apiKey: string): Promise<{
+  valid: boolean
+  error?: string
+  models?: string[]
+}> {
+  const { data } = await apiClient.post<{
+    valid: boolean
+    error?: string
+    models?: string[]
+  }>('/admin/groups/validate-openai-api-key', { api_key: apiKey })
+  return data
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -501,7 +519,8 @@ export const groupsAPI = {
   batchSetGroupRPMOverrides,
   updateSortOrder,
   getUsageSummary,
-  getCapacitySummary
+  getCapacitySummary,
+  validateOpenAIApiKey
 }
 
 export default groupsAPI

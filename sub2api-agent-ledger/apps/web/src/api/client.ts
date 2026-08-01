@@ -99,13 +99,13 @@ export const api = {
   settings() {
     return request<Record<string, unknown>>('/api/settings/main-service');
   },
-  saveSettings(body: { baseUrl: string; apiKey?: string }) {
+  saveSettings(body: { baseUrl: string; adminEmail?: string; adminPassword?: string }) {
     return request('/api/settings/main-service', {
       method: 'PUT',
       body: JSON.stringify(body),
     });
   },
-  testSettings(body: { baseUrl?: string; apiKey?: string }) {
+  testSettings(body: { baseUrl?: string; adminEmail?: string; adminPassword?: string }) {
     return request('/api/settings/main-service/test', {
       method: 'POST',
       body: JSON.stringify(body),

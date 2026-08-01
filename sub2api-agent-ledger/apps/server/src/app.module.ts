@@ -46,6 +46,22 @@ const authService = new AuthService(
 const auditService = new AuditService(sqlite);
 const ledgerService = new LedgerService(sqlite);
 const settingsService = new SettingsService(sqlite, masterKey, createMainServiceClient);
+const mainServiceBaseUrl = process.env.MAIN_SERVICE_BASE_URL?.trim();
+const mainServiceAdminEmail = process.env.MAIN_SERVICE_ADMIN_EMAIL?.trim();
+const mainServiceAdminPassword = process.env.MAIN_SERVICE_ADMIN_PASSWORD;
+if (
+  !settingsService.getView().configured &&
+  mainServiceBaseUrl &&
+  mainServiceAdminEmail &&
+  mainServiceAdminPassword
+) {
+  settingsService.save({
+    baseUrl: mainServiceBaseUrl,
+    adminEmail: mainServiceAdminEmail,
+    adminPassword: mainServiceAdminPassword,
+    updatedBy: 'environment-bootstrap',
+  });
+}
 const syncService = new SyncService(sqlite, settingsService);
 const agentsService = new AgentsService(sqlite, ledgerService, userRepository, sessionStore);
 const assignmentsService = new AssignmentsService(sqlite);
@@ -59,7 +75,6 @@ async function bootstrapAdmin() {
       throw new Error('生产环境必须设置 BOOTSTRAP_ADMIN_PASSWORD');
     }
     // ha-min: 开发默认口令，生产已上方拒绝
-    // eslint-disable-next-line no-console
     console.warn(
       '[bootstrap] BOOTSTRAP_ADMIN_PASSWORD 未设置，开发环境使用临时口令 change-this-password',
     );

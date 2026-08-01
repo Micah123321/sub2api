@@ -20,23 +20,23 @@ export default {
       cards: {
         quickStart: {
           title: '快速开始',
-          description: '创建 API Key，绑定服务分组，发出你的第一个请求。',
-          meta: '三步开始'
+          description: '注册账户后，在控制台创建 API Key，选择要使用的服务分组（如 Claude、GPT），即可开始调用。整个过程不超过 3 分钟。',
+          meta: '3 分钟上手'
         },
         apiAccess: {
-          title: 'API 接入',
-          description: '使用 OpenAI-compatible 或 Anthropic Messages 接口接入现有应用。',
-          meta: '统一端点'
+          title: 'API 接入指南',
+          description: '支持 OpenAI SDK、Anthropic SDK 和任何兼容 OpenAI API 的工具。只需修改 base_url 参数指向本平台端点，并使用平台生成的 API Key，无需改动其他代码。',
+          meta: '兼容主流 SDK'
         },
         cliSdk: {
-          title: 'CLI 与 SDK',
-          description: '为 Claude Code、Codex CLI、OpenCode 或官方 SDK 配置同一套网关地址。',
-          meta: '配置示例'
+          title: 'CLI 与开发工具',
+          description: '适配 Claude Code、Codex、Cursor、Continue 等主流 AI 编程工具。在工具配置中填入平台 API 端点和密钥，即可通过统一网关访问多个模型。附带详细的环境变量和配置文件示例。',
+          meta: '开箱即用'
         },
         troubleshooting: {
-          title: '排查问题',
-          description: '从认证、配额、上游限流和请求路径开始定位常见错误。',
-          meta: '常见问题'
+          title: '常见问题排查',
+          description: '遇到 401 认证失败？检查 API Key 是否正确。遇到 429 限流？查看配额使用情况。遇到 502 上游错误？检查服务分组状态。提供完整的错误码对照表和解决方案。',
+          meta: '快速定位'
         }
       }
     },

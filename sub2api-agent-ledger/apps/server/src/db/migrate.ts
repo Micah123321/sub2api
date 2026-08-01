@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS main_service_settings (
   base_url TEXT NOT NULL,
   api_key_ciphertext TEXT NOT NULL,
   key_version INTEGER NOT NULL DEFAULT 1,
+  admin_email_ciphertext TEXT NOT NULL DEFAULT '',
+  admin_password_ciphertext TEXT NOT NULL DEFAULT '',
+  credential_version INTEGER NOT NULL DEFAULT 1,
   updated_by TEXT,
   updated_at INTEGER NOT NULL
 );
@@ -185,6 +188,7 @@ CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
 export const MIGRATION_ID = '0001_init';
 export const MIGRATION_USAGE_MICRO_ID = '0002_usage_amount_micro';
 export const MIGRATION_PAID_CARD_ISSUE_ID = '0003_paid_card_issue';
+export const MIGRATION_ADMIN_LOGIN_ID = '0004_main_service_admin_login';
 
 // remote_usage_records 是主服务用量的只读缓存，重建后会由下一次同步重新拉取，
 // 因此这里直接重建表而不是转换旧值：旧列存的是「分」，小额用量已被舍入成 0，
@@ -239,6 +243,27 @@ function migratePaidCardIssue(sqlite: Database.Database): void {
   `);
 }
 
+function migrateMainServiceAdminLogin(sqlite: Database.Database): void {
+  addColumnIfMissing(
+    sqlite,
+    'main_service_settings',
+    'admin_email_ciphertext',
+    "admin_email_ciphertext TEXT NOT NULL DEFAULT ''",
+  );
+  addColumnIfMissing(
+    sqlite,
+    'main_service_settings',
+    'admin_password_ciphertext',
+    "admin_password_ciphertext TEXT NOT NULL DEFAULT ''",
+  );
+  addColumnIfMissing(
+    sqlite,
+    'main_service_settings',
+    'credential_version',
+    'credential_version INTEGER NOT NULL DEFAULT 1',
+  );
+}
+
 export function runMigrations(sqlite: Database.Database): { applied: string[] } {
   sqlite.exec(MIGRATION_SQL);
   const applied: string[] = [];
@@ -277,6 +302,19 @@ export function runMigrations(sqlite: Database.Database): { applied: string[] } 
         .run(MIGRATION_PAID_CARD_ISSUE_ID, Date.now());
     })();
     applied.push(MIGRATION_PAID_CARD_ISSUE_ID);
+  }
+
+  const hasAdminLogin = sqlite
+    .prepare('SELECT id FROM schema_migrations WHERE id = ?')
+    .get(MIGRATION_ADMIN_LOGIN_ID) as { id: string } | undefined;
+  if (!hasAdminLogin) {
+    sqlite.transaction(() => {
+      migrateMainServiceAdminLogin(sqlite);
+      sqlite
+        .prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)')
+        .run(MIGRATION_ADMIN_LOGIN_ID, Date.now());
+    })();
+    applied.push(MIGRATION_ADMIN_LOGIN_ID);
   }
 
   return { applied };

@@ -20,23 +20,23 @@ export default {
       cards: {
         quickStart: {
           title: 'Quick start',
-          description: 'Create an API key, attach a service group, and send your first request.',
-          meta: 'Three steps'
+          description: 'After registration, create an API Key in the dashboard, select a service group (Claude, GPT, etc.), and start making calls. The entire process takes less than 3 minutes.',
+          meta: '3 min setup'
         },
         apiAccess: {
-          title: 'API access',
-          description: 'Connect an existing app through the OpenAI-compatible or Anthropic Messages interface.',
-          meta: 'One endpoint'
+          title: 'API integration',
+          description: 'Works with OpenAI SDK, Anthropic SDK, and any OpenAI-compatible tool. Simply point the base_url parameter to our endpoint and use your platform API Key. No other code changes needed.',
+          meta: 'Drop-in compatible'
         },
         cliSdk: {
-          title: 'CLI and SDKs',
-          description: 'Configure Claude Code, Codex CLI, OpenCode, or an official SDK with the same gateway URL.',
-          meta: 'Setup examples'
+          title: 'CLI and dev tools',
+          description: 'Compatible with Claude Code, Codex, Cursor, Continue, and other AI coding assistants. Enter the platform endpoint and key in your tool settings to access multiple models through one gateway. Includes detailed config examples and environment variable templates.',
+          meta: 'Works out of the box'
         },
         troubleshooting: {
-          title: 'Troubleshooting',
-          description: 'Start with authentication, quota, upstream limits, and request paths when a call fails.',
-          meta: 'Common issues'
+          title: 'Common issues',
+          description: '401 authentication failed? Check your API Key. 429 rate limited? Review quota usage. 502 upstream error? Verify service group status. Complete error code reference and solutions provided.',
+          meta: 'Quick diagnosis'
         }
       }
     },

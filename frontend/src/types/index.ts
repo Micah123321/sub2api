@@ -585,6 +585,10 @@ export interface AdminGroup extends Group {
   messages_dispatch_model_config?: OpenAIMessagesDispatchModelConfig
   models_list_config?: ModelsListConfig
 
+  // OpenAI API Key 配置（仅 openai 平台使用）
+  openai_api_key?: string | null
+  openai_api_key_status?: 'configured' | 'not_configured'
+
   // 分组排序
   sort_order: number
 }
@@ -757,6 +761,7 @@ export interface CreateGroupRequest {
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   require_oauth_only?: boolean
   require_privacy_set?: boolean
+  openai_api_key?: string | null
   // 从指定分组复制账号
   copy_accounts_from_group_ids?: number[]
 }
@@ -808,6 +813,7 @@ export interface UpdateGroupRequest {
   reasoning_effort_mappings?: ReasoningEffortMapping[]
   require_oauth_only?: boolean
   require_privacy_set?: boolean
+  openai_api_key?: string | null
   copy_accounts_from_group_ids?: number[]
 }
 

@@ -29,6 +29,9 @@ export const mainServiceSettings = sqliteTable('main_service_settings', {
   baseUrl: text('base_url').notNull(),
   apiKeyCiphertext: text('api_key_ciphertext').notNull(),
   keyVersion: integer('key_version').notNull().default(1),
+  adminEmailCiphertext: text('admin_email_ciphertext').notNull().default(''),
+  adminPasswordCiphertext: text('admin_password_ciphertext').notNull().default(''),
+  credentialVersion: integer('credential_version').notNull().default(1),
   updatedBy: text('updated_by'),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });

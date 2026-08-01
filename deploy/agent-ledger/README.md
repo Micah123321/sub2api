@@ -48,10 +48,11 @@ docker compose -f deploy/agent-ledger/docker-compose.yml --env-file deploy/agent
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `SESSION_SECRET` | 是 | Cookie 会话密钥，≥16 字符 |
-| `PLUGIN_MASTER_KEY` | 是 | 加密主服务 Admin API Key，建议 32 字节 base64 |
+| `PLUGIN_MASTER_KEY` | 是 | 加密主服务管理员凭据，建议 32 字节 base64 |
 | `BOOTSTRAP_ADMIN_PASSWORD` | 是 | 首次管理员密码 |
 | `MAIN_SERVICE_BASE_URL` | 否 | 默认 `http://host.docker.internal:8080` |
-| `MAIN_SERVICE_ADMIN_API_KEY` | 否 | 主服务 Admin API Key；也可登录后在设置页配置 |
+| `MAIN_SERVICE_ADMIN_EMAIL` | 否 | 首次引导用主服务管理员邮箱；也可在插件设置页配置 |
+| `MAIN_SERVICE_ADMIN_PASSWORD` | 否 | 首次引导用管理员密码；只用于服务端登录并加密保存 |
 | `CORS_ORIGINS` | 否 | 前端源白名单，逗号分隔 |
 | `AGENT_LEDGER_PORT` | 否 | 宿主机端口，默认 `4173` |
 
@@ -64,6 +65,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ## 与主服务
 
 - 不写入主服务数据库，不改主服务 compose。
+- 通过 `/api/v1/auth/login` 获取管理员 JWT；JWT 失效后自动重新登录一次。
+- 主服务启用管理员 TOTP 或强制 Turnstile 时，邮箱/密码自动登录可能被拒绝。
+- 环境变量仅在 SQLite 尚未配置主服务时导入；后续请在插件设置页更新凭据。
 - 宿主机主服务：`MAIN_SERVICE_BASE_URL=http://host.docker.internal:8080`
 - 同 Docker 网络：改为服务名，例如 `http://sub2api:8080`，并把本服务加入该网络。
 

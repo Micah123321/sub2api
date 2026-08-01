@@ -1394,6 +1394,17 @@
           </div>
         </div>
 
+        <!-- OpenAI API Key 配置（仅 openai 平台） -->
+        <div
+          v-if="createForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <OpenAIApiKeyConfig
+            v-model="createForm.openai_api_key"
+            mode="create"
+          />
+        </div>
+
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
@@ -2945,6 +2956,18 @@
           </div>
         </div>
 
+        <!-- OpenAI API Key 配置（仅 openai 平台） -->
+        <div
+          v-if="editForm.platform === 'openai'"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
+        >
+          <OpenAIApiKeyConfig
+            v-model="editForm.openai_api_key"
+            mode="edit"
+            :existing-key-masked="editingGroup?.openai_api_key_status === 'configured' ? '••••••' : null"
+          />
+        </div>
+
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
           v-if="editForm.platform === 'openai'"
@@ -4071,6 +4094,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import OpenAIApiKeyConfig from "@/components/admin/group/OpenAIApiKeyConfig.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import { VueDraggable } from "vue-draggable-plus";
@@ -4622,6 +4646,8 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // OpenAI API Key 配置（仅 openai 平台使用）
+  openai_api_key: null as string | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -4972,6 +4998,8 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // OpenAI API Key 配置（仅 openai 平台使用）
+  openai_api_key: null as string | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   allow_live: false,
@@ -5415,6 +5443,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  createForm.openai_api_key = null;
   resetMessagesDispatchFormState(createForm);
   createForm.allow_live = false;
   createForm.require_oauth_only = false;
@@ -5476,6 +5505,7 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createForm,
+      openai_api_key: createForm.platform === "openai" ? createForm.openai_api_key : null,
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -5598,6 +5628,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
+  editForm.openai_api_key = null; // 编辑时不预填充，只显示配置状态
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );

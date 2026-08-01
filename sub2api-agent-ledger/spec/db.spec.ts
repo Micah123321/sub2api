@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import {
   runMigrations,
+  MIGRATION_ADMIN_LOGIN_ID,
   MIGRATION_ID,
   MIGRATION_PAID_CARD_ISSUE_ID,
   MIGRATION_USAGE_MICRO_ID,
@@ -15,6 +16,7 @@ describe('sqlite migrations', () => {
       MIGRATION_ID,
       MIGRATION_USAGE_MICRO_ID,
       MIGRATION_PAID_CARD_ISSUE_ID,
+      MIGRATION_ADMIN_LOGIN_ID,
     ]);
     const second = runMigrations(sqlite);
     expect(second.applied).toEqual([]);
@@ -91,6 +93,7 @@ describe('sqlite migrations', () => {
     expect(applied.applied).toEqual([
       MIGRATION_USAGE_MICRO_ID,
       MIGRATION_PAID_CARD_ISSUE_ID,
+      MIGRATION_ADMIN_LOGIN_ID,
     ]);
 
     const columns = (
@@ -108,6 +111,17 @@ describe('sqlite migrations', () => {
       sqlite.prepare(`PRAGMA table_info(ledger_transactions)`).all() as Array<{ name: string }>
     ).map((column) => column.name);
     expect(ledgerColumns).toContain('related_batch_id');
+
+    const settingsColumns = (
+      sqlite.prepare(`PRAGMA table_info(main_service_settings)`).all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    expect(settingsColumns).toEqual(
+      expect.arrayContaining([
+        'admin_email_ciphertext',
+        'admin_password_ciphertext',
+        'credential_version',
+      ]),
+    );
 
     // 重建后唯一索引必须仍然存在，否则同步的 ON CONFLICT 会退化成重复插入。
     const indexes = (

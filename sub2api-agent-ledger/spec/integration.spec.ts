@@ -10,8 +10,20 @@ import { canAccessAgent } from '../apps/server/src/auth/auth.types';
 
 describe('integration: remote client and security', () => {
   it('maps remote envelope and rejects unregistered paths', async () => {
-    const fetchImpl: typeof fetch = async (input) => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
       const url = String(input);
+      requests.push({ url, init });
+      if (url.endsWith('/api/v1/auth/login')) {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            message: 'success',
+            data: { access_token: 'jwt-admin', user: { role: 'admin' } },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
       if (url.includes('/api/v1/admin/users?')) {
         return new Response(
           JSON.stringify({
@@ -40,21 +52,72 @@ describe('integration: remote client and security', () => {
 
     const client = new MainServiceClient({
       baseUrl: 'http://main.local',
-      apiKey: 'secret',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
       fetchImpl,
     });
     const users = await client.listUsers();
     expect(users.total).toBe(1);
     expect(users.items[0].username).toBe('user7');
+    expect(requests).toHaveLength(2);
+    expect(new Headers(requests[1].init?.headers).get('authorization')).toBe(
+      'Bearer jwt-admin',
+    );
 
-    const unauthorizedFetch: typeof fetch = async () =>
-      new Response(JSON.stringify({ code: 401, message: 'no' }), { status: 401 });
+    let loginCount = 0;
+    const unauthorizedFetch: typeof fetch = async (input) => {
+      if (String(input).endsWith('/api/v1/auth/login')) {
+        loginCount += 1;
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            message: 'success',
+            data: { access_token: `jwt-${loginCount}`, user: { role: 'admin' } },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ code: 401, message: 'no' }), { status: 401 });
+    };
     const badClient = new MainServiceClient({
       baseUrl: 'http://main.local',
-      apiKey: 'secret',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
       fetchImpl: unauthorizedFetch,
     });
     await expect(badClient.listUsers()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(loginCount).toBe(2);
+  });
+
+  it('rejects 2FA and non-admin main-service logins', async () => {
+    const twoFactorClient = new MainServiceClient({
+      baseUrl: 'http://main.local',
+      adminEmail: 'admin@example.com',
+      adminPassword: 'secret',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({ code: 0, data: { requires_2fa: true, temp_token: 'temp' } }),
+          { status: 200 },
+        ),
+    });
+    await expect(twoFactorClient.listUsers()).rejects.toMatchObject({
+      code: 'TWO_FACTOR_REQUIRED',
+    });
+
+    const userClient = new MainServiceClient({
+      baseUrl: 'http://main.local',
+      adminEmail: 'user@example.com',
+      adminPassword: 'secret',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: { access_token: 'jwt-user', user: { role: 'user' } },
+          }),
+          { status: 200 },
+        ),
+    });
+    await expect(userClient.listUsers()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('supports batch bind conflict and transfer semantics', () => {

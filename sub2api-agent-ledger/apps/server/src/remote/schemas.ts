@@ -6,6 +6,19 @@ export const mainServiceEnvelopeSchema = z.object({
   data: z.unknown().optional(),
 });
 
+export const mainServiceLoginSchema = z.union([
+  z.object({
+    requires_2fa: z.literal(true),
+    temp_token: z.string().optional(),
+  }),
+  z.object({
+    access_token: z.string().min(1),
+    user: z.object({
+      role: z.string(),
+    }),
+  }),
+]);
+
 export const mainServiceUserSchema = z.object({
   id: z.union([z.number(), z.string()]),
   email: z.string().optional().default(''),

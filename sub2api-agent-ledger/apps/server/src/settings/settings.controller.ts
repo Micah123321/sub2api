@@ -49,7 +49,7 @@ export class SettingsController {
   @Put('main-service')
   saveMainService(
     @Req() request: FastifyRequest & { auth?: SessionUser; cookies?: Record<string, string> },
-    @Body() body: { baseUrl?: string; apiKey?: string },
+    @Body() body: { baseUrl?: string; adminEmail?: string; adminPassword?: string },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
@@ -62,7 +62,8 @@ export class SettingsController {
     try {
       const view = this.settings.save({
         baseUrl: body.baseUrl ?? '',
-        apiKey: body.apiKey,
+        adminEmail: body.adminEmail,
+        adminPassword: body.adminPassword,
         updatedBy: request.auth?.userId ?? null,
       });
       this.audit.write({
@@ -70,7 +71,10 @@ export class SettingsController {
         actorRole: request.auth?.role,
         action: 'settings.main_service.update',
         resourceType: 'main_service_settings',
-        payload: { baseUrl: view.baseUrl, keyVersion: view.keyVersion },
+        payload: {
+          baseUrl: view.baseUrl,
+          credentialVersion: view.credentialVersion,
+        },
         requestId,
       });
       return ok(view, requestId);
@@ -86,7 +90,7 @@ export class SettingsController {
   @Post('main-service/test')
   async testMainService(
     @Req() request: FastifyRequest & { auth?: SessionUser; cookies?: Record<string, string> },
-    @Body() body: { baseUrl?: string; apiKey?: string },
+    @Body() body: { baseUrl?: string; adminEmail?: string; adminPassword?: string },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const requestId = createRequestId();
@@ -99,7 +103,8 @@ export class SettingsController {
     try {
       const result = await this.settings.testConnection({
         baseUrl: body.baseUrl,
-        apiKey: body.apiKey,
+        adminEmail: body.adminEmail,
+        adminPassword: body.adminPassword,
       });
       this.audit.write({
         actorId: request.auth?.userId,
